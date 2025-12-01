@@ -1,0 +1,71 @@
+-- name: test_url_basic
+-- description: Basic tests for URL() function
+
+-- Test simple GET request (requires local HTTP server on port 18080)
+-- Note: To run these tests, start a local HTTP server:
+-- python3 -m http.server 18080
+
+-- Test 1: NULL input
+SELECT url(NULL);
+
+-- Test 2: Empty string
+SELECT url('');
+
+-- Test 3: Invalid URL
+SELECT url('not a valid url');
+
+-- Test 4: Simple GET request (commented out - requires local server)
+-- SELECT url('http://localhost:18080/test');
+
+-- Test 5: GET with method specified
+-- SELECT url('http://localhost:18080/test', 'GET');
+
+-- Test 6: POST with custom headers
+-- SELECT url(
+--     'http://localhost:18080/api/test',
+--     'POST',
+--     map{'Content-Type': 'application/json', 'X-Custom-Header': 'test-value'}
+-- );
+
+-- Test 7: POST with body and timeout
+-- SELECT url(
+--     'http://localhost:18080/api/echo',
+--     'POST',
+--     map{'Content-Type': 'application/json'},
+--     '{"test": "data"}',
+--     5000
+-- );
+
+-- Test 8: Request with SSL options
+-- SELECT url(
+--     'https://httpbin.org/get',
+--     'GET',
+--     map{},
+--     '',
+--     30000,
+--     map{'ssl_verify_peer': 'false', 'ssl_verify_host': 'false'}
+-- );
+
+-- Test 9: Session variable configuration
+SET url_max_response_size = 2097152;  -- 2MB
+SET url_default_timeout_ms = 60000;    -- 60 seconds
+SET url_ssl_verify_peer = false;
+SET url_ssl_verify_host = false;
+
+-- Show session variables
+SHOW VARIABLES LIKE 'url_%';
+
+-- Reset to defaults
+SET url_max_response_size = 1048576;   -- 1MB
+SET url_default_timeout_ms = 30000;    -- 30 seconds
+SET url_ssl_verify_peer = true;
+SET url_ssl_verify_host = true;
+
+-- Test 10: Multiple rows with URL function
+-- CREATE TABLE test_urls (id INT, url VARCHAR(200));
+-- INSERT INTO test_urls VALUES
+--     (1, 'http://localhost:18080/api/user/1'),
+--     (2, 'http://localhost:18080/api/user/2'),
+--     (3, 'http://localhost:18080/api/user/3');
+-- SELECT id, url(url, 'GET') as response FROM test_urls;
+-- DROP TABLE test_urls;
