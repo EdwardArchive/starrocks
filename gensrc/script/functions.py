@@ -439,6 +439,19 @@ vectorized_functions = [
 
     [30460, 'format_bytes', True, False, 'VARCHAR', ['BIGINT'], 'StringFunctions::format_bytes'],
 
+    # URL function - HTTP request scalar function
+    [30500, 'url', True, False, 'VARCHAR', ['VARCHAR'], 'UrlFunctions::url',
+     'UrlFunctions::url_prepare', 'UrlFunctions::url_close'],
+    [30501, 'url', True, False, 'VARCHAR', ['VARCHAR', 'VARCHAR'], 'UrlFunctions::url',
+     'UrlFunctions::url_prepare', 'UrlFunctions::url_close'],
+    [30502, 'url', True, False, 'VARCHAR', ['VARCHAR', 'VARCHAR', 'MAP_VARCHAR_VARCHAR'], 'UrlFunctions::url',
+     'UrlFunctions::url_prepare', 'UrlFunctions::url_close'],
+    [30503, 'url', True, False, 'VARCHAR', ['VARCHAR', 'VARCHAR', 'MAP_VARCHAR_VARCHAR', 'VARCHAR', 'INT'],
+     'UrlFunctions::url', 'UrlFunctions::url_prepare', 'UrlFunctions::url_close'],
+    [30504, 'url', True, False, 'VARCHAR',
+     ['VARCHAR', 'VARCHAR', 'MAP_VARCHAR_VARCHAR', 'VARCHAR', 'INT', 'MAP_VARCHAR_VARCHAR'], 'UrlFunctions::url',
+     'UrlFunctions::url_prepare', 'UrlFunctions::url_close'],
+
     # Binary Functions
     # to_binary
     [30600, 'to_binary', True, True, 'VARBINARY', ['VARCHAR', 'VARCHAR'], 'BinaryFunctions::to_binary',

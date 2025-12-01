@@ -111,6 +111,7 @@ set(EXPR_FILES
   hash_functions.cpp
   gin_functions.cpp
   ai_functions.cpp
+  url_functions.cpp
 )
 
 if(STARROCKS_JIT_ENABLE)

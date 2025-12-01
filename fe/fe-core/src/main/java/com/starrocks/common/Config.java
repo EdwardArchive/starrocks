@@ -4040,4 +4040,12 @@ public class Config extends ConfigBase {
     public static int compound_predicate_flatten_threshold = 512;
 
     @ConfField public static int ui_queries_sql_statement_max_length = 128;
+
+    /**
+     * URL function settings
+     * Admin-enforced SSL verification for URL function.
+     * If true, SSL peer and host verification cannot be disabled via session variables.
+     */
+    @ConfField(mutable = true, comment = "Enforce SSL verification for URL function (cannot be disabled by users)")
+    public static boolean url_ssl_verification_required = false;
 }
