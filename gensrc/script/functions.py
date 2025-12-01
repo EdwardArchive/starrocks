@@ -440,15 +440,15 @@ vectorized_functions = [
     [30460, 'format_bytes', True, False, 'VARCHAR', ['BIGINT'], 'StringFunctions::format_bytes'],
 
     # URL function - HTTP request scalar function
-    [30500, 'url', True, False, 'VARCHAR', ['VARCHAR'], 'UrlFunctions::url',
+    [30470, 'url', True, False, 'VARCHAR', ['VARCHAR'], 'UrlFunctions::url',
      'UrlFunctions::url_prepare', 'UrlFunctions::url_close'],
-    [30501, 'url', True, False, 'VARCHAR', ['VARCHAR', 'VARCHAR'], 'UrlFunctions::url',
+    [30471, 'url', True, False, 'VARCHAR', ['VARCHAR', 'VARCHAR'], 'UrlFunctions::url',
      'UrlFunctions::url_prepare', 'UrlFunctions::url_close'],
-    [30502, 'url', True, False, 'VARCHAR', ['VARCHAR', 'VARCHAR', 'MAP_VARCHAR_VARCHAR'], 'UrlFunctions::url',
+    [30472, 'url', True, False, 'VARCHAR', ['VARCHAR', 'VARCHAR', 'MAP_VARCHAR_VARCHAR'], 'UrlFunctions::url',
      'UrlFunctions::url_prepare', 'UrlFunctions::url_close'],
-    [30503, 'url', True, False, 'VARCHAR', ['VARCHAR', 'VARCHAR', 'MAP_VARCHAR_VARCHAR', 'VARCHAR', 'INT'],
+    [30473, 'url', True, False, 'VARCHAR', ['VARCHAR', 'VARCHAR', 'MAP_VARCHAR_VARCHAR', 'VARCHAR', 'INT'],
      'UrlFunctions::url', 'UrlFunctions::url_prepare', 'UrlFunctions::url_close'],
-    [30504, 'url', True, False, 'VARCHAR',
+    [30474, 'url', True, False, 'VARCHAR',
      ['VARCHAR', 'VARCHAR', 'MAP_VARCHAR_VARCHAR', 'VARCHAR', 'INT', 'MAP_VARCHAR_VARCHAR'], 'UrlFunctions::url',
      'UrlFunctions::url_prepare', 'UrlFunctions::url_close'],
 

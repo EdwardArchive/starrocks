@@ -16,12 +16,13 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
+#include <cctype>
+
 #include "column/column_helper.h"
 #include "column/map_column.h"
 #include "column/nullable_column.h"
 #include "common/compiler_util.h"
-#include "common/config.h"
-#include "gutil/strings/ascii_ctype.h"
 #include "gutil/strings/strip.h"
 #include "http/http_client.h"
 #include "http/http_method.h"
@@ -37,7 +38,9 @@ const bool DEFAULT_SSL_VERIFY_HOST = true;
 
 // Helper function: Parse HTTP method from string
 static HttpMethod parse_http_method(const Slice& method_str) {
-    std::string method_upper = ascii_toupper(method_str.to_string());
+    std::string method_upper = method_str.to_string();
+    std::transform(method_upper.begin(), method_upper.end(), method_upper.begin(),
+                   [](unsigned char c) { return std::toupper(c); });
 
     if (method_upper == "GET") {
         return HttpMethod::GET;
@@ -64,7 +67,7 @@ static std::optional<std::string> get_map_value(const MapColumn* map_col, size_t
 
     auto keys_column = map_col->keys_column();
     auto values_column = map_col->values_column();
-    auto offsets = map_col->offsets().get_data();
+    const auto& offsets = map_col->offsets().immutable_data();
 
     // Get key-value range for this row
     uint32_t start = offsets[row_idx];
@@ -114,7 +117,7 @@ static void apply_headers(HttpClient* client, const MapColumn* headers_map, size
 
     auto keys_column = headers_map->keys_column();
     auto values_column = headers_map->values_column();
-    auto offsets = headers_map->offsets().get_data();
+    const auto& offsets = headers_map->offsets().immutable_data();
 
     uint32_t start = offsets[row_idx];
     uint32_t end = offsets[row_idx + 1];
@@ -165,13 +168,17 @@ static void apply_ssl_options(HttpClient* client, const MapColumn* options_map, 
     if (options_map != nullptr) {
         auto ssl_verify_peer_opt = get_map_value(options_map, row_idx, "ssl_verify_peer");
         if (ssl_verify_peer_opt.has_value()) {
-            std::string val_lower = ascii_tolower(ssl_verify_peer_opt.value());
+            std::string val_lower = ssl_verify_peer_opt.value();
+            std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
             verify_peer = (val_lower == "true" || val_lower == "1");
         }
 
         auto ssl_verify_host_opt = get_map_value(options_map, row_idx, "ssl_verify_host");
         if (ssl_verify_host_opt.has_value()) {
-            std::string val_lower = ascii_tolower(ssl_verify_host_opt.value());
+            std::string val_lower = ssl_verify_host_opt.value();
+            std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
             verify_host = (val_lower == "true" || val_lower == "1");
         }
 
@@ -281,7 +288,7 @@ static StatusOr<std::string> execute_http_request(const Slice& url_slice, const 
     return response;
 }
 
-// Prepare function: Read global Config and initialize state
+// Prepare function: Initialize state
 Status UrlFunctions::url_prepare(FunctionContext* context, FunctionContext::FunctionStateScope scope) {
     if (scope != FunctionContext::FRAGMENT_LOCAL) {
         return Status::OK();
@@ -289,8 +296,8 @@ Status UrlFunctions::url_prepare(FunctionContext* context, FunctionContext::Func
 
     auto* state = new UrlFunctionState();
 
-    // Read global Config value for SSL verification enforcement
-    state->ssl_verify_required = config::url_ssl_verify_required;
+    // SSL verification is enabled by default (can be disabled per-call via options MAP)
+    state->ssl_verify_required = false;
 
     context->set_function_state(scope, state);
     return Status::OK();
@@ -397,7 +404,7 @@ StatusOr<ColumnPtr> UrlFunctions::url(FunctionContext* context, const Columns& c
         if (!response.ok()) {
             // Return NULL and add warning
             result.append_null();
-            context->add_warning(response.status().message().c_str());
+            context->add_warning(std::string(response.status().message()).c_str());
             continue;
         }
 
