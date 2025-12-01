@@ -416,3 +416,5 @@ StatusOr<ColumnPtr> UrlFunctions::url(FunctionContext* context, const Columns& c
 }
 
 } // namespace starrocks
+
+#include "gen_cpp/opcode/UrlFunctions.inc"
