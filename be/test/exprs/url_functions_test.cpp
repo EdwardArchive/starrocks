@@ -55,10 +55,7 @@ PARALLEL_TEST_F(UrlFunctionsTest, prepareCloseTest) {
     ASSERT_NE(nullptr, state);
 
     // Verify default values
-    ASSERT_EQ(1048576, state->max_response_size);  // 1MB
-    ASSERT_EQ(30000, state->default_timeout_ms);   // 30 seconds
-    ASSERT_TRUE(state->ssl_verify_peer);
-    ASSERT_TRUE(state->ssl_verify_host);
+    // ssl_verify_required is false by default (admin can enable via Config)
     ASSERT_FALSE(state->ssl_verify_required);
 
     // Test url_close

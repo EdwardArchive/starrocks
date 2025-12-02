@@ -66,6 +66,42 @@ static HttpMethod parse_http_method(const Slice& method_str) {
     return HttpMethod::GET; // Default to GET
 }
 
+// Helper function: Validate UTF-8 string
+// Returns true if the string is valid UTF-8, false otherwise
+static bool is_valid_utf8(const std::string& s) {
+    size_t i = 0;
+    while (i < s.size()) {
+        unsigned char c = static_cast<unsigned char>(s[i]);
+
+        int char_len;
+        if ((c & 0x80) == 0) {
+            char_len = 1;  // ASCII
+        } else if ((c & 0xE0) == 0xC0) {
+            char_len = 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            char_len = 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            char_len = 4;
+        } else {
+            return false;  // Invalid start byte
+        }
+
+        if (i + char_len > s.size()) {
+            return false;  // Truncated sequence
+        }
+
+        // Check continuation bytes
+        for (int j = 1; j < char_len; ++j) {
+            if ((static_cast<unsigned char>(s[i + j]) & 0xC0) != 0x80) {
+                return false;  // Invalid continuation byte
+            }
+        }
+
+        i += char_len;
+    }
+    return true;
+}
+
 // Helper function: Escape string for JSON
 static std::string escape_json_string(const std::string& s) {
     std::string result;
@@ -175,21 +211,30 @@ static StatusOr<UrlConfig> parse_config(const std::string& config_json) {
     return config;
 }
 
-// Helper function: Check if string is valid JSON
+// Helper function: Check if string is valid JSON using simdjson
 static bool is_valid_json(const std::string& s) {
     if (s.empty()) return false;
-    // Simple heuristic: starts with { or [ and is balanced
+    // Quick check: must start with { or [
     char first = s[0];
     if (first != '{' && first != '[') return false;
-    // Try to find matching end
-    char last = s.back();
-    return (first == '{' && last == '}') || (first == '[' && last == ']');
+
+    // Use simdjson for proper validation
+    simdjson::ondemand::parser parser;
+    simdjson::padded_string padded(s);
+    auto result = parser.iterate(padded);
+    return result.error() == simdjson::SUCCESS;
 }
 
 // Helper function: Build JSON response string
 // Returns: {"status": <code>, "body": <json_or_string>} or {"status": -1, "body": null, "error": "<message>"}
 // If body is valid JSON, it's embedded directly; otherwise it's escaped as a string
+// Returns error if body contains invalid UTF-8
 static std::string build_json_response(long http_status, const std::string& body) {
+    // Validate UTF-8 encoding
+    if (!is_valid_utf8(body)) {
+        return fmt::format(R"({{"status": {}, "body": null, "error": "Response contains invalid UTF-8 encoding"}})", http_status);
+    }
+
     if (is_valid_json(body)) {
         // Body is JSON - embed directly without escaping
         return fmt::format(R"({{"status": {}, "body": {}}})", http_status, body);
