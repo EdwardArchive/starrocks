@@ -31,26 +31,15 @@ struct UrlFunctionState {
 class UrlFunctions {
 public:
     /**
-     * URL function - Execute HTTP requests from SQL
-     *
-     * Supported signatures:
-     * - url(url VARCHAR) -> VARCHAR                                           // Simple GET
-     * - url(url VARCHAR, method VARCHAR) -> VARCHAR                           // GET/POST/PUT with method
-     * - url(url VARCHAR, method VARCHAR, headers MAP) -> VARCHAR              // With custom headers
-     * - url(url VARCHAR, method VARCHAR, headers MAP, body VARCHAR, timeout INT) -> VARCHAR
-     * - url(url VARCHAR, method VARCHAR, headers MAP, body VARCHAR, timeout INT, options MAP) -> VARCHAR
-     */
-    DEFINE_VECTORIZED_FN(url);
-
-    /**
      * URL function with JSON config string
      *
      * Signature:
+     * - url(url VARCHAR) -> VARCHAR
      * - url(url VARCHAR, config VARCHAR) -> VARCHAR
      *
      * Config JSON format:
      * {
-     *     "method": "GET|POST|PUT|DELETE|PATCH",  // default: "GET"
+     *     "method": "GET|POST|PUT|DELETE",  // default: "GET"
      *     "headers": {"key": "value", ...},        // default: {}
      *     "body": <string|object>,                 // default: null (object auto-stringify)
      *     "timeout_ms": 30000,                     // default: 30000
@@ -59,6 +48,8 @@ public:
      *     "password": "pass"                       // default: null
      * }
      */
+    DEFINE_VECTORIZED_FN(url);
+
     DEFINE_VECTORIZED_FN(url_with_config);
 
     /**

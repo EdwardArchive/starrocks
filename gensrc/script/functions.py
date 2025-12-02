@@ -440,11 +440,8 @@ vectorized_functions = [
     [30460, 'format_bytes', True, False, 'VARCHAR', ['BIGINT'], 'StringFunctions::format_bytes'],
 
     # URL function - HTTP request scalar function
-    # url(url) - Simple GET request
     [30470, 'url', True, False, 'VARCHAR', ['VARCHAR'], 'UrlFunctions::url',
      'UrlFunctions::url_prepare', 'UrlFunctions::url_close'],
-    # url(url, config_json) - Full HTTP request with JSON config
-    # config_json: {"method":"POST","headers":{"Content-Type":"application/json"},"body":{...},"timeout_ms":30000}
     [30471, 'url', True, False, 'VARCHAR', ['VARCHAR', 'VARCHAR'], 'UrlFunctions::url_with_config',
      'UrlFunctions::url_prepare', 'UrlFunctions::url_close'],
 
