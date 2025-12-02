@@ -31,10 +31,15 @@ VARCHAR url(VARCHAR url, VARCHAR config)
 
 Returns a VARCHAR containing a JSON object:
 
-- `{"status": 200, "body": ...}` for HTTP responses (body is JSON or escaped string)
-- `{"status": -1, "body": null, "error": "..."}` for network errors
+- `{"status": <code>, "body": ...}` for HTTP responses (body is JSON or escaped string)
+- `{"status": -1, "body": null, "error": "..."}` for errors
 
-Returns NULL if the URL is invalid or empty.
+Error cases that return JSON error response:
+- Invalid or empty URL
+- Invalid JSON config format
+- Network/connection errors
+- Response size exceeds 1MB limit
+- Request timeout
 
 ## Examples
 

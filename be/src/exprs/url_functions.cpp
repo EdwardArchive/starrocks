@@ -20,10 +20,12 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <optional>
 
 #include "column/column_helper.h"
 #include "http/http_client.h"
 #include "http/http_method.h"
+#include "runtime/runtime_state.h"
 
 namespace starrocks {
 
@@ -110,67 +112,66 @@ static StatusOr<UrlConfig> parse_config(const std::string& config_json) {
 
     // method
     std::string_view method_sv;
-    if (!obj["method"].get_string().get(method_sv)) {
+    if (obj["method"].get_string().get(method_sv) == simdjson::SUCCESS) {
         config.method = std::string(method_sv);
     }
 
     // timeout_ms
     int64_t timeout;
-    if (!obj["timeout_ms"].get_int64().get(timeout)) {
+    if (obj["timeout_ms"].get_int64().get(timeout) == simdjson::SUCCESS) {
         config.timeout_ms = static_cast<int32_t>(timeout);
     }
 
     // ssl_verify
     bool ssl_verify;
-    if (!obj["ssl_verify"].get_bool().get(ssl_verify)) {
+    if (obj["ssl_verify"].get_bool().get(ssl_verify) == simdjson::SUCCESS) {
         config.ssl_verify = ssl_verify;
     }
 
     // username, password
     std::string_view username_sv, password_sv;
-    if (!obj["username"].get_string().get(username_sv)) {
+    if (obj["username"].get_string().get(username_sv) == simdjson::SUCCESS) {
         config.username = std::string(username_sv);
     }
-    if (!obj["password"].get_string().get(password_sv)) {
+    if (obj["password"].get_string().get(password_sv) == simdjson::SUCCESS) {
         config.password = std::string(password_sv);
     }
 
     // headers (object)
     simdjson::ondemand::object headers_obj;
-    if (!obj["headers"].get_object().get(headers_obj)) {
+    if (obj["headers"].get_object().get(headers_obj) == simdjson::SUCCESS) {
         for (auto field : headers_obj) {
             auto key_result = field.escaped_key();
-            if (key_result.error()) continue;
+            if (key_result.error() != simdjson::SUCCESS) continue;
             std::string_view key = key_result.value();
             std::string_view value;
-            if (!field.value().get_string().get(value)) {
+            if (field.value().get_string().get(value) == simdjson::SUCCESS) {
                 config.headers[std::string(key)] = std::string(value);
             }
         }
     }
 
-    // body: object/array면 stringify, string이면 그대로
+    // body: If it’s an object/array, stringify it; if it’s a string, leave it as is.
     simdjson::ondemand::value body_val;
-    if (!obj["body"].get(body_val)) {
+    if (obj["body"].get(body_val) == simdjson::SUCCESS) {
         auto body_type = body_val.type();
-        if (!body_type.error()) {
+        if (body_type.error() == simdjson::SUCCESS) {
             if (body_type.value() == simdjson::ondemand::json_type::object ||
                 body_type.value() == simdjson::ondemand::json_type::array) {
                 // JSON stringify
                 auto json_str = simdjson::to_json_string(body_val);
-                if (!json_str.error()) {
+                if (json_str.error() == simdjson::SUCCESS) {
                     config.body = std::string(json_str.value());
                 }
             } else if (body_type.value() == simdjson::ondemand::json_type::string) {
                 // string
                 std::string_view body_sv;
-                if (!body_val.get_string().get(body_sv)) {
+                if (body_val.get_string().get(body_sv) == simdjson::SUCCESS) {
                     config.body = std::string(body_sv);
                 }
             }
         }
     }
-
     return config;
 }
 
@@ -203,10 +204,8 @@ static std::string build_json_error_response(const std::string& error_message) {
 }
 
 // Helper function: Execute HTTP request with UrlConfig
-static StatusOr<std::string> execute_http_request_with_config(const Slice& url_slice, const UrlConfig& config,
+static StatusOr<std::string> execute_http_request_with_config(HttpClient& client, const Slice& url_slice, const UrlConfig& config,
                                                                const UrlFunctionState* state) {
-    HttpClient client;
-
     // Initialize with URL
     std::string url_str = url_slice.to_string();
     Status init_status = client.init(url_str);
@@ -227,7 +226,7 @@ static StatusOr<std::string> execute_http_request_with_config(const Slice& url_s
     }
 
     // Apply body
-    if (!config.body.empty() && (method == HttpMethod::POST || method == HttpMethod::PUT)) {
+    if (!config.body.empty() && (method == HttpMethod::POST || method == HttpMethod::PUT || method == HttpMethod::DELETE)) {
         client.set_payload(config.body);
     }
 
@@ -274,8 +273,14 @@ Status UrlFunctions::url_prepare(FunctionContext* context, FunctionContext::Func
 
     auto* state = new UrlFunctionState();
 
-    // SSL verification is enabled by default (can be disabled per-call via options MAP)
-    state->ssl_verify_required = false;
+    // Get FE's Config.url_ssl_verification_required value from RuntimeState
+    // When admin sets url_ssl_verification_required=true, ssl_verify=false in JSON config is ignored
+    RuntimeState* runtime_state = context->state();
+    if (runtime_state != nullptr) {
+        state->ssl_verify_required = runtime_state->url_ssl_verification_required();
+    } else {
+        state->ssl_verify_required = false;
+    }
 
     context->set_function_state(scope, state);
     return Status::OK();
@@ -308,13 +313,20 @@ StatusOr<ColumnPtr> UrlFunctions::url(FunctionContext* context, const Columns& c
         return Status::InternalError("URL function state not initialized");
     }
 
+    // Create ColumnViewer outside the loop for better performance
+    auto url_viewer = ColumnViewer<TYPE_VARCHAR>(columns[0]);
+
     // Build result column
     ColumnBuilder<TYPE_VARCHAR> result(num_rows);
 
+    // Default config for simple GET request
+    UrlConfig default_config;
+
+    // Reuse HttpClient across rows for better performance
+    HttpClient client;
+
     // Process each row
     for (size_t i = 0; i < num_rows; i++) {
-        // Argument 0: URL (required)
-        auto url_viewer = ColumnViewer<TYPE_VARCHAR>(columns[0]);
         if (url_viewer.is_null(i)) {
             result.append_null();
             continue;
@@ -322,8 +334,7 @@ StatusOr<ColumnPtr> UrlFunctions::url(FunctionContext* context, const Columns& c
         Slice url_slice = url_viewer.value(i);
 
         // Execute simple GET request with default config
-        UrlConfig default_config;
-        auto response = execute_http_request_with_config(url_slice, default_config, state);
+        auto response = execute_http_request_with_config(client, url_slice, default_config, state);
 
         if (!response.ok()) {
             result.append_null();
@@ -351,47 +362,61 @@ StatusOr<ColumnPtr> UrlFunctions::url_with_config(FunctionContext* context, cons
         return Status::InternalError("URL function state not initialized");
     }
 
+    // Create ColumnViewers outside the loop for better performance
+    auto url_viewer = ColumnViewer<TYPE_VARCHAR>(columns[0]);
+    auto config_viewer = ColumnViewer<TYPE_VARCHAR>(columns[1]);
+
+    // Cache constant config to avoid repeated parsing
+    bool config_is_const = columns[1]->is_constant();
+    std::optional<UrlConfig> const_config;
+
+    if (config_is_const && !config_viewer.is_null(0)) {
+        Slice config_slice = config_viewer.value(0);
+        auto config_result = parse_config(config_slice.to_string());
+        if (config_result.ok()) {
+            const_config = config_result.value();
+        }
+    }
+
     // Build result column
     ColumnBuilder<TYPE_VARCHAR> result(num_rows);
 
+    // Default config for fallback
+    UrlConfig default_config;
+
+    // Reuse HttpClient across rows for better performance
+    HttpClient client;
+
     // Process each row
     for (size_t i = 0; i < num_rows; i++) {
-        // Argument 0: URL (required)
-        auto url_viewer = ColumnViewer<TYPE_VARCHAR>(columns[0]);
         if (url_viewer.is_null(i)) {
             result.append_null();
             continue;
         }
         Slice url_slice = url_viewer.value(i);
 
-        // Argument 1: JSON config string (required)
-        auto config_viewer = ColumnViewer<TYPE_VARCHAR>(columns[1]);
-        if (config_viewer.is_null(i)) {
+        // Determine which config to use
+        UrlConfig config;
+        if (const_config.has_value()) {
+            // Use cached constant config
+            config = const_config.value();
+        } else if (config_viewer.is_null(i)) {
             // No config provided, use defaults
-            UrlConfig default_config;
-            auto response = execute_http_request_with_config(url_slice, default_config, state);
-            if (!response.ok()) {
-                result.append_null();
-                context->add_warning(std::string(response.status().message()).c_str());
+            config = default_config;
+        } else {
+            // Parse config for this row
+            Slice config_slice = config_viewer.value(i);
+            auto config_result = parse_config(config_slice.to_string());
+            if (!config_result.ok()) {
+                // Return JSON error response instead of NULL for better usability
+                result.append(Slice(build_json_error_response("Failed to parse config: invalid JSON format")));
                 continue;
             }
-            result.append(Slice(response.value()));
-            continue;
-        }
-
-        Slice config_slice = config_viewer.value(i);
-        std::string config_json = config_slice.to_string();
-
-        // Parse JSON config
-        auto config_result = parse_config(config_json);
-        if (!config_result.ok()) {
-            result.append_null();
-            context->add_warning(std::string(config_result.status().message()).c_str());
-            continue;
+            config = config_result.value();
         }
 
         // Execute HTTP request with config
-        auto response = execute_http_request_with_config(url_slice, config_result.value(), state);
+        auto response = execute_http_request_with_config(client, url_slice, config, state);
         if (!response.ok()) {
             result.append_null();
             context->add_warning(std::string(response.status().message()).c_str());

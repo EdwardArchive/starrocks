@@ -367,6 +367,11 @@ public:
                _query_options.enable_full_sort_use_german_string;
     }
 
+    bool url_ssl_verification_required() const {
+        return _query_options.__isset.url_ssl_verification_required &&
+               _query_options.url_ssl_verification_required;
+    }
+
     int32_t spill_mem_table_size() const {
         return EXTRACE_SPILL_PARAM(_query_options, _spill_options, spill_mem_table_size);
     }
