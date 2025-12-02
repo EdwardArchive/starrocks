@@ -756,6 +756,7 @@ public class FunctionSet {
                     .add(RANDOM)
                     .add(UUID)
                     .add(SLEEP)
+                    .add(URL)
                     .build();
 
     public static final Set<String> VECTOR_COMPUTE_FUNCTIONS =

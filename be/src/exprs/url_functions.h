@@ -43,6 +43,25 @@ public:
     DEFINE_VECTORIZED_FN(url);
 
     /**
+     * URL function with JSON config string
+     *
+     * Signature:
+     * - url(url VARCHAR, config VARCHAR) -> VARCHAR
+     *
+     * Config JSON format:
+     * {
+     *     "method": "GET|POST|PUT|DELETE|PATCH",  // default: "GET"
+     *     "headers": {"key": "value", ...},        // default: {}
+     *     "body": <string|object>,                 // default: null (object auto-stringify)
+     *     "timeout_ms": 30000,                     // default: 30000
+     *     "ssl_verify": true,                      // default: true
+     *     "username": "user",                      // default: null
+     *     "password": "pass"                       // default: null
+     * }
+     */
+    DEFINE_VECTORIZED_FN(url_with_config);
+
+    /**
      * Prepare function - Called once per fragment
      * Reads global Config and initializes UrlFunctionState
      */

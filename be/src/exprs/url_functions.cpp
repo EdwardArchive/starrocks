@@ -15,26 +15,31 @@
 #include "exprs/url_functions.h"
 
 #include <fmt/format.h>
+#include <simdjson.h>
 
 #include <algorithm>
 #include <cctype>
+#include <map>
 
 #include "column/column_helper.h"
-#include "column/map_column.h"
-#include "column/nullable_column.h"
-#include "common/compiler_util.h"
-#include "gutil/strings/strip.h"
 #include "http/http_client.h"
 #include "http/http_method.h"
 
 namespace starrocks {
 
-// Hardcoded default values for URL function configuration
-// These can be overridden per-call using the options MAP parameter
-const int64_t DEFAULT_MAX_RESPONSE_SIZE = 1048576;     // 1MB
-const int32_t DEFAULT_TIMEOUT_MS = 30000;              // 30 seconds
-const bool DEFAULT_SSL_VERIFY_PEER = true;
-const bool DEFAULT_SSL_VERIFY_HOST = true;
+// URL configuration parsed from JSON config string
+struct UrlConfig {
+    std::string method = "GET";
+    std::map<std::string, std::string> headers;
+    std::string body;
+    int32_t timeout_ms = 30000;
+    bool ssl_verify = true;
+    std::string username;
+    std::string password;
+};
+
+// Default values for URL function configuration
+const int64_t DEFAULT_MAX_RESPONSE_SIZE = 1048576;  // 1MB
 
 // Helper function: Parse HTTP method from string
 static HttpMethod parse_http_method(const Slice& method_str) {
@@ -59,233 +64,206 @@ static HttpMethod parse_http_method(const Slice& method_str) {
     return HttpMethod::GET; // Default to GET
 }
 
-// Helper function: Extract string value from MAP column at given row for a specific key
-static std::optional<std::string> get_map_value(const MapColumn* map_col, size_t row_idx, const std::string& key) {
-    if (map_col == nullptr) {
-        return std::nullopt;
+// Helper function: Escape string for JSON
+static std::string escape_json_string(const std::string& s) {
+    std::string result;
+    result.reserve(s.size() + 16);  // Reserve some extra space for escapes
+    for (char c : s) {
+        switch (c) {
+            case '"': result += "\\\""; break;
+            case '\\': result += "\\\\"; break;
+            case '\n': result += "\\n"; break;
+            case '\r': result += "\\r"; break;
+            case '\t': result += "\\t"; break;
+            case '\b': result += "\\b"; break;
+            case '\f': result += "\\f"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    // Control characters - encode as \uXXXX
+                    result += fmt::format("\\u{:04x}", static_cast<unsigned char>(c));
+                } else {
+                    result += c;
+                }
+        }
+    }
+    return result;
+}
+
+// Helper function: Parse JSON config string into UrlConfig struct
+static StatusOr<UrlConfig> parse_config(const std::string& config_json) {
+    UrlConfig config;
+
+    simdjson::ondemand::parser parser;
+    simdjson::padded_string padded(config_json);
+
+    auto doc_result = parser.iterate(padded);
+    if (doc_result.error()) {
+        return Status::InvalidArgument(
+                fmt::format("Invalid JSON config: {}", simdjson::error_message(doc_result.error())));
     }
 
-    auto keys_column = map_col->keys_column();
-    auto values_column = map_col->values_column();
-    const auto& offsets = map_col->offsets().immutable_data();
-
-    // Get key-value range for this row
-    uint32_t start = offsets[row_idx];
-    uint32_t end = offsets[row_idx + 1];
-
-    // Unwrap nullable columns if needed
-    const BinaryColumn* keys_data = nullptr;
-    const BinaryColumn* values_data = nullptr;
-
-    if (keys_column->is_nullable()) {
-        auto nullable_keys = down_cast<const NullableColumn*>(keys_column.get());
-        keys_data = down_cast<const BinaryColumn*>(nullable_keys->data_column().get());
-    } else {
-        keys_data = down_cast<const BinaryColumn*>(keys_column.get());
+    simdjson::ondemand::document doc = std::move(doc_result.value());
+    simdjson::ondemand::object obj;
+    if (doc.get_object().get(obj)) {
+        return Status::InvalidArgument("Config must be a JSON object");
     }
 
-    if (values_column->is_nullable()) {
-        auto nullable_values = down_cast<const NullableColumn*>(values_column.get());
-        values_data = down_cast<const BinaryColumn*>(nullable_values->data_column().get());
-    } else {
-        values_data = down_cast<const BinaryColumn*>(values_column.get());
+    // method
+    std::string_view method_sv;
+    if (!obj["method"].get_string().get(method_sv)) {
+        config.method = std::string(method_sv);
     }
 
-    // Search for the key
-    for (uint32_t i = start; i < end; i++) {
-        Slice key_slice = keys_data->get_slice(i);
-        if (key_slice.to_string() == key) {
-            // Check if value is null
-            if (values_column->is_nullable()) {
-                auto nullable_values = down_cast<const NullableColumn*>(values_column.get());
-                if (nullable_values->is_null(i)) {
-                    return std::nullopt;
+    // timeout_ms
+    int64_t timeout;
+    if (!obj["timeout_ms"].get_int64().get(timeout)) {
+        config.timeout_ms = static_cast<int32_t>(timeout);
+    }
+
+    // ssl_verify
+    bool ssl_verify;
+    if (!obj["ssl_verify"].get_bool().get(ssl_verify)) {
+        config.ssl_verify = ssl_verify;
+    }
+
+    // username, password
+    std::string_view username_sv, password_sv;
+    if (!obj["username"].get_string().get(username_sv)) {
+        config.username = std::string(username_sv);
+    }
+    if (!obj["password"].get_string().get(password_sv)) {
+        config.password = std::string(password_sv);
+    }
+
+    // headers (object)
+    simdjson::ondemand::object headers_obj;
+    if (!obj["headers"].get_object().get(headers_obj)) {
+        for (auto field : headers_obj) {
+            auto key_result = field.escaped_key();
+            if (key_result.error()) continue;
+            std::string_view key = key_result.value();
+            std::string_view value;
+            if (!field.value().get_string().get(value)) {
+                config.headers[std::string(key)] = std::string(value);
+            }
+        }
+    }
+
+    // body: object/array면 stringify, string이면 그대로
+    simdjson::ondemand::value body_val;
+    if (!obj["body"].get(body_val)) {
+        auto body_type = body_val.type();
+        if (!body_type.error()) {
+            if (body_type.value() == simdjson::ondemand::json_type::object ||
+                body_type.value() == simdjson::ondemand::json_type::array) {
+                // JSON stringify
+                auto json_str = simdjson::to_json_string(body_val);
+                if (!json_str.error()) {
+                    config.body = std::string(json_str.value());
+                }
+            } else if (body_type.value() == simdjson::ondemand::json_type::string) {
+                // string
+                std::string_view body_sv;
+                if (!body_val.get_string().get(body_sv)) {
+                    config.body = std::string(body_sv);
                 }
             }
-            return values_data->get_slice(i).to_string();
         }
     }
 
-    return std::nullopt;
+    return config;
 }
 
-// Helper function: Apply headers from MAP column to HttpClient
-static void apply_headers(HttpClient* client, const MapColumn* headers_map, size_t row_idx) {
-    if (headers_map == nullptr) {
-        return;
-    }
+// Helper function: Check if string is valid JSON
+static bool is_valid_json(const std::string& s) {
+    if (s.empty()) return false;
+    // Simple heuristic: starts with { or [ and is balanced
+    char first = s[0];
+    if (first != '{' && first != '[') return false;
+    // Try to find matching end
+    char last = s.back();
+    return (first == '{' && last == '}') || (first == '[' && last == ']');
+}
 
-    auto keys_column = headers_map->keys_column();
-    auto values_column = headers_map->values_column();
-    const auto& offsets = headers_map->offsets().immutable_data();
-
-    uint32_t start = offsets[row_idx];
-    uint32_t end = offsets[row_idx + 1];
-
-    // Unwrap nullable columns
-    const BinaryColumn* keys_data = nullptr;
-    const BinaryColumn* values_data = nullptr;
-
-    if (keys_column->is_nullable()) {
-        auto nullable_keys = down_cast<const NullableColumn*>(keys_column.get());
-        keys_data = down_cast<const BinaryColumn*>(nullable_keys->data_column().get());
+// Helper function: Build JSON response string
+// Returns: {"status": <code>, "body": <json_or_string>} or {"status": -1, "body": null, "error": "<message>"}
+// If body is valid JSON, it's embedded directly; otherwise it's escaped as a string
+static std::string build_json_response(long http_status, const std::string& body) {
+    if (is_valid_json(body)) {
+        // Body is JSON - embed directly without escaping
+        return fmt::format(R"({{"status": {}, "body": {}}})", http_status, body);
     } else {
-        keys_data = down_cast<const BinaryColumn*>(keys_column.get());
-    }
-
-    if (values_column->is_nullable()) {
-        auto nullable_values = down_cast<const NullableColumn*>(values_column.get());
-        values_data = down_cast<const BinaryColumn*>(nullable_values->data_column().get());
-    } else {
-        values_data = down_cast<const BinaryColumn*>(values_column.get());
-    }
-
-    // Apply all headers
-    for (uint32_t i = start; i < end; i++) {
-        // Skip if value is null
-        if (values_column->is_nullable()) {
-            auto nullable_values = down_cast<const NullableColumn*>(values_column.get());
-            if (nullable_values->is_null(i)) {
-                continue;
-            }
-        }
-
-        std::string key = keys_data->get_slice(i).to_string();
-        std::string value = values_data->get_slice(i).to_string();
-        client->set_header(key, value);
+        // Body is plain text - escape as string
+        return fmt::format(R"({{"status": {}, "body": "{}"}})", http_status, escape_json_string(body));
     }
 }
 
-// Helper function: Apply SSL options from options MAP
-static void apply_ssl_options(HttpClient* client, const MapColumn* options_map, size_t row_idx,
-                               const UrlFunctionState* state) {
-    // Start with hardcoded defaults
-    bool verify_peer = DEFAULT_SSL_VERIFY_PEER;
-    bool verify_host = DEFAULT_SSL_VERIFY_HOST;
-    std::string ca_cert_path;
-
-    // Override with options MAP if provided
-    if (options_map != nullptr) {
-        auto ssl_verify_peer_opt = get_map_value(options_map, row_idx, "ssl_verify_peer");
-        if (ssl_verify_peer_opt.has_value()) {
-            std::string val_lower = ssl_verify_peer_opt.value();
-            std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
-            verify_peer = (val_lower == "true" || val_lower == "1");
-        }
-
-        auto ssl_verify_host_opt = get_map_value(options_map, row_idx, "ssl_verify_host");
-        if (ssl_verify_host_opt.has_value()) {
-            std::string val_lower = ssl_verify_host_opt.value();
-            std::transform(val_lower.begin(), val_lower.end(), val_lower.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
-            verify_host = (val_lower == "true" || val_lower == "1");
-        }
-
-        auto ca_cert_opt = get_map_value(options_map, row_idx, "ca_cert");
-        if (ca_cert_opt.has_value() && !ca_cert_opt.value().empty()) {
-            ca_cert_path = ca_cert_opt.value();
-        }
-
-        // Client certificate (mTLS) - Note: Would need HttpClient API support
-        // auto client_cert_opt = get_map_value(options_map, row_idx, "client_cert");
-        // auto client_key_opt = get_map_value(options_map, row_idx, "client_key");
-        // TODO: Add client certificate support to HttpClient class
-    }
-
-    // Check if admin has enforced SSL verification (from global Config)
-    if (state->ssl_verify_required) {
-        verify_peer = true;
-        verify_host = true;
-    }
-
-    // Apply SSL settings
-    if (!verify_peer && !verify_host) {
-        client->trust_all_ssl();
-    }
-    // Note: HttpClient::trust_all_ssl() disables both peer and host verification
-    // For fine-grained control, we would need to extend HttpClient API
-    // TODO: Add methods like set_ssl_verify_peer() and set_ssl_verify_host() to HttpClient
+static std::string build_json_error_response(const std::string& error_message) {
+    return fmt::format(R"({{"status": -1, "body": null, "error": "{}"}})", escape_json_string(error_message));
 }
 
-// Helper function: Execute HTTP request
-static StatusOr<std::string> execute_http_request(const Slice& url_slice, const Slice& method_slice,
-                                                    const MapColumn* headers_map, const Slice& body_slice,
-                                                    int32_t timeout_ms, const MapColumn* options_map, size_t row_idx,
-                                                    const UrlFunctionState* state) {
-    // Create HttpClient
+// Helper function: Execute HTTP request with UrlConfig
+static StatusOr<std::string> execute_http_request_with_config(const Slice& url_slice, const UrlConfig& config,
+                                                               const UrlFunctionState* state) {
     HttpClient client;
 
     // Initialize with URL
     std::string url_str = url_slice.to_string();
-    RETURN_IF_ERROR(client.init(url_str));
+    Status init_status = client.init(url_str);
+    if (!init_status.ok()) {
+        return build_json_error_response(std::string(init_status.message()));
+    }
+
+    // Disable CURLOPT_FAILONERROR to get HTTP error responses
+    client.set_fail_on_error(false);
 
     // Set HTTP method
-    HttpMethod method = parse_http_method(method_slice);
+    HttpMethod method = parse_http_method(Slice(config.method));
     client.set_method(method);
 
-    // Apply headers
-    apply_headers(&client, headers_map, row_idx);
-
-    // Apply Basic Authentication from options MAP if provided
-    if (options_map != nullptr) {
-        auto username_opt = get_map_value(options_map, row_idx, "username");
-        auto password_opt = get_map_value(options_map, row_idx, "password");
-        if (username_opt.has_value() && password_opt.has_value()) {
-            client.set_basic_auth(username_opt.value(), password_opt.value());
-        }
+    // Apply headers from config
+    for (const auto& [key, value] : config.headers) {
+        client.set_header(key, value);
     }
 
-    // Set request body for POST/PUT
-    if (!body_slice.empty() && (method == HttpMethod::POST || method == HttpMethod::PUT)) {
-        client.set_payload(body_slice.to_string());
+    // Apply body
+    if (!config.body.empty() && (method == HttpMethod::POST || method == HttpMethod::PUT)) {
+        client.set_payload(config.body);
     }
 
-    // Set timeout (use parameter if provided, otherwise check options MAP, otherwise use default)
-    int64_t actual_timeout = DEFAULT_TIMEOUT_MS;
-    if (timeout_ms > 0) {
-        actual_timeout = timeout_ms;
-    } else if (options_map != nullptr) {
-        auto timeout_opt = get_map_value(options_map, row_idx, "timeout_ms");
-        if (timeout_opt.has_value()) {
-            try {
-                actual_timeout = std::stoi(timeout_opt.value());
-            } catch (...) {
-                // Invalid timeout value, use default
-            }
-        }
-    }
-    client.set_timeout_ms(actual_timeout);
+    // Apply timeout
+    client.set_timeout_ms(config.timeout_ms);
 
-    // Apply SSL options
-    apply_ssl_options(&client, options_map, row_idx, state);
+    // Apply SSL settings
+    if (!config.ssl_verify && !state->ssl_verify_required) {
+        client.trust_all_ssl();
+    }
+
+    // Apply Basic Auth
+    if (!config.username.empty()) {
+        client.set_basic_auth(config.username, config.password);
+    }
 
     // Execute request
     std::string response;
-    RETURN_IF_ERROR(client.execute(&response));
+    Status exec_status = client.execute(&response);
 
-    // Check response size limit (read from options MAP or use default)
-    int64_t max_response_size = DEFAULT_MAX_RESPONSE_SIZE;
-    if (options_map != nullptr) {
-        auto max_size_opt = get_map_value(options_map, row_idx, "max_response_size");
-        if (max_size_opt.has_value()) {
-            try {
-                max_response_size = std::stoll(max_size_opt.value());
-            } catch (...) {
-                // Invalid size value, use default
-            }
-        }
+    // Get HTTP status code
+    long http_status = client.get_http_status();
+
+    // Check for network/curl errors
+    if (!exec_status.ok()) {
+        return build_json_error_response(std::string(exec_status.message()));
     }
 
-    if (response.size() > static_cast<size_t>(max_response_size)) {
-        return Status::InternalError(fmt::format("Response size exceeds limit ({} bytes). Received: {} bytes",
-                                                  max_response_size, response.size()));
+    // Check response size limit
+    if (response.size() > static_cast<size_t>(DEFAULT_MAX_RESPONSE_SIZE)) {
+        return build_json_error_response(fmt::format("Response size exceeds limit ({} bytes). Received: {} bytes",
+                                                     DEFAULT_MAX_RESPONSE_SIZE, response.size()));
     }
 
-    // Note: We return the response body even for HTTP error status codes (4xx, 5xx)
-    // This allows users to parse error messages from the response
-
-    return response;
+    // Return JSON response with HTTP status code and body
+    return build_json_response(http_status, response);
 }
 
 // Prepare function: Initialize state
@@ -317,12 +295,11 @@ Status UrlFunctions::url_close(FunctionContext* context, FunctionContext::Functi
     return Status::OK();
 }
 
-// Main URL function implementation
+// Main URL function implementation (1-arg: simple GET request)
 StatusOr<ColumnPtr> UrlFunctions::url(FunctionContext* context, const Columns& columns) {
     RETURN_IF_COLUMNS_ONLY_NULL(columns);
 
     size_t num_rows = columns[0]->size();
-    size_t num_args = columns.size();
 
     // Get function state
     auto* state = reinterpret_cast<UrlFunctionState*>(
@@ -336,14 +313,6 @@ StatusOr<ColumnPtr> UrlFunctions::url(FunctionContext* context, const Columns& c
 
     // Process each row
     for (size_t i = 0; i < num_rows; i++) {
-        // Parse arguments based on number of parameters
-        // Supported overloads:
-        // 1: url(url)
-        // 2: url(url, method)
-        // 3: url(url, method, headers)
-        // 5: url(url, method, headers, body, timeout)
-        // 6: url(url, method, headers, body, timeout, options)
-
         // Argument 0: URL (required)
         auto url_viewer = ColumnViewer<TYPE_VARCHAR>(columns[0]);
         if (url_viewer.is_null(i)) {
@@ -352,63 +321,83 @@ StatusOr<ColumnPtr> UrlFunctions::url(FunctionContext* context, const Columns& c
         }
         Slice url_slice = url_viewer.value(i);
 
-        // Argument 1: Method (optional, default: GET)
-        Slice method_slice = Slice("GET");
-        if (num_args >= 2) {
-            auto method_viewer = ColumnViewer<TYPE_VARCHAR>(columns[1]);
-            if (!method_viewer.is_null(i)) {
-                method_slice = method_viewer.value(i);
-            }
-        }
-
-        // Argument 2: Headers MAP (optional)
-        const MapColumn* headers_map = nullptr;
-        if (num_args >= 3 && !columns[2]->only_null()) {
-            auto headers_col = ColumnHelper::get_data_column(columns[2].get());
-            if (!columns[2]->is_null(i)) {
-                headers_map = down_cast<const MapColumn*>(headers_col);
-            }
-        }
-
-        // Argument 3: Body (optional, for POST/PUT)
-        Slice body_slice;
-        if (num_args >= 5) {
-            auto body_viewer = ColumnViewer<TYPE_VARCHAR>(columns[3]);
-            if (!body_viewer.is_null(i)) {
-                body_slice = body_viewer.value(i);
-            }
-        }
-
-        // Argument 4: Timeout (optional, default from state)
-        int32_t timeout_ms = 0;
-        if (num_args >= 5) {
-            auto timeout_viewer = ColumnViewer<TYPE_INT>(columns[4]);
-            if (!timeout_viewer.is_null(i)) {
-                timeout_ms = timeout_viewer.value(i);
-            }
-        }
-
-        // Argument 5: Options MAP (optional)
-        const MapColumn* options_map = nullptr;
-        if (num_args >= 6 && !columns[5]->only_null()) {
-            auto options_col = ColumnHelper::get_data_column(columns[5].get());
-            if (!columns[5]->is_null(i)) {
-                options_map = down_cast<const MapColumn*>(options_col);
-            }
-        }
-
-        // Execute HTTP request
-        auto response = execute_http_request(url_slice, method_slice, headers_map, body_slice, timeout_ms, options_map,
-                                              i, state);
+        // Execute simple GET request with default config
+        UrlConfig default_config;
+        auto response = execute_http_request_with_config(url_slice, default_config, state);
 
         if (!response.ok()) {
-            // Return NULL and add warning
             result.append_null();
             context->add_warning(std::string(response.status().message()).c_str());
             continue;
         }
 
-        // Append successful response
+        result.append(Slice(response.value()));
+    }
+
+    return result.build(ColumnHelper::is_all_const(columns));
+}
+
+// URL function with JSON config string (2-arg overload)
+// url(url, config_json)
+StatusOr<ColumnPtr> UrlFunctions::url_with_config(FunctionContext* context, const Columns& columns) {
+    RETURN_IF_COLUMNS_ONLY_NULL(columns);
+
+    size_t num_rows = columns[0]->size();
+
+    // Get function state
+    auto* state =
+            reinterpret_cast<UrlFunctionState*>(context->get_function_state(FunctionContext::FRAGMENT_LOCAL));
+    if (state == nullptr) {
+        return Status::InternalError("URL function state not initialized");
+    }
+
+    // Build result column
+    ColumnBuilder<TYPE_VARCHAR> result(num_rows);
+
+    // Process each row
+    for (size_t i = 0; i < num_rows; i++) {
+        // Argument 0: URL (required)
+        auto url_viewer = ColumnViewer<TYPE_VARCHAR>(columns[0]);
+        if (url_viewer.is_null(i)) {
+            result.append_null();
+            continue;
+        }
+        Slice url_slice = url_viewer.value(i);
+
+        // Argument 1: JSON config string (required)
+        auto config_viewer = ColumnViewer<TYPE_VARCHAR>(columns[1]);
+        if (config_viewer.is_null(i)) {
+            // No config provided, use defaults
+            UrlConfig default_config;
+            auto response = execute_http_request_with_config(url_slice, default_config, state);
+            if (!response.ok()) {
+                result.append_null();
+                context->add_warning(std::string(response.status().message()).c_str());
+                continue;
+            }
+            result.append(Slice(response.value()));
+            continue;
+        }
+
+        Slice config_slice = config_viewer.value(i);
+        std::string config_json = config_slice.to_string();
+
+        // Parse JSON config
+        auto config_result = parse_config(config_json);
+        if (!config_result.ok()) {
+            result.append_null();
+            context->add_warning(std::string(config_result.status().message()).c_str());
+            continue;
+        }
+
+        // Execute HTTP request with config
+        auto response = execute_http_request_with_config(url_slice, config_result.value(), state);
+        if (!response.ok()) {
+            result.append_null();
+            context->add_warning(std::string(response.status().message()).c_str());
+            continue;
+        }
+
         result.append(Slice(response.value()));
     }
 
