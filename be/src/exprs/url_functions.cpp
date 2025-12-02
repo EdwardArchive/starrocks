@@ -152,9 +152,17 @@ static StatusOr<UrlConfig> parse_config(const std::string& config_json) {
         config.method = std::string(method_sv);
     }
 
-    // timeout_ms
+    // timeout_ms with bounds checking to prevent integer overflow
     int64_t timeout;
     if (obj["timeout_ms"].get_int64().get(timeout) == simdjson::SUCCESS) {
+        // Clamp to valid range: 1ms to 5 minutes (300,000ms)
+        constexpr int64_t MIN_TIMEOUT_MS = 1;
+        constexpr int64_t MAX_TIMEOUT_MS = 300000;
+        if (timeout < MIN_TIMEOUT_MS) {
+            timeout = MIN_TIMEOUT_MS;
+        } else if (timeout > MAX_TIMEOUT_MS) {
+            timeout = MAX_TIMEOUT_MS;
+        }
         config.timeout_ms = static_cast<int32_t>(timeout);
     }
 
@@ -288,22 +296,35 @@ static StatusOr<std::string> execute_http_request_with_config(HttpClient& client
         client.set_basic_auth(config.username, config.password);
     }
 
-    // Execute request
+    // Execute request with streaming size check to prevent memory exhaustion
+    // The callback aborts download immediately when size limit is exceeded
     std::string response;
-    Status exec_status = client.execute(&response);
+    size_t total_size = 0;
+    bool size_exceeded = false;
+
+    auto size_check_callback = [&](const void* data, size_t length) -> bool {
+        total_size += length;
+        if (total_size > static_cast<size_t>(DEFAULT_MAX_RESPONSE_SIZE)) {
+            size_exceeded = true;
+            return false;  // Abort download immediately
+        }
+        response.append(static_cast<const char*>(data), length);
+        return true;
+    };
+
+    Status exec_status = client.execute(size_check_callback);
 
     // Get HTTP status code
     long http_status = client.get_http_status();
 
+    // Check if size limit was exceeded during streaming
+    if (size_exceeded) {
+        return build_json_error_response(fmt::format("Response size exceeds limit ({} bytes)", DEFAULT_MAX_RESPONSE_SIZE));
+    }
+
     // Check for network/curl errors
     if (!exec_status.ok()) {
         return build_json_error_response(std::string(exec_status.message()));
-    }
-
-    // Check response size limit
-    if (response.size() > static_cast<size_t>(DEFAULT_MAX_RESPONSE_SIZE)) {
-        return build_json_error_response(fmt::format("Response size exceeds limit ({} bytes). Received: {} bytes",
-                                                     DEFAULT_MAX_RESPONSE_SIZE, response.size()));
     }
 
     // Return JSON response with HTTP status code and body

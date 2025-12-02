@@ -22,7 +22,7 @@ VARCHAR url(VARCHAR url, VARCHAR config)
 - `method`: HTTP method (`GET`, `POST`, `PUT`, `DELETE`). Default: `GET`.
 - `headers`: custom HTTP headers as object. Default: `{}`.
 - `body`: request body. String or object (auto-stringified to JSON). Default: `null`.
-- `timeout_ms`: timeout in milliseconds. Default: `30000`.
+- `timeout_ms`: timeout in milliseconds. (Default: `30000`, `min` : 1, `max` : 300,000)
 - `ssl_verify`: SSL certificate verification. Default: `true`.
 - `username`: HTTP Basic Auth username. Default: `null`.
 - `password`: HTTP Basic Auth password. Default: `null`.
