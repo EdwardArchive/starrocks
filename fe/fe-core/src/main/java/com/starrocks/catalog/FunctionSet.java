@@ -256,7 +256,7 @@ public class FunctionSet {
     public static final String UPPER = "upper";
     public static final String SUBSTRING_INDEX = "substring_index";
     public static final String FIELD = "field";
-    public static final String URL = "url";
+    public static final String HTTP_REQUEST = "http_request";
 
     // Json functions:
     public static final String JSON_ARRAY = "json_array";
@@ -756,7 +756,7 @@ public class FunctionSet {
                     .add(RANDOM)
                     .add(UUID)
                     .add(SLEEP)
-                    .add(URL)
+                    .add(HTTP_REQUEST)
                     .build();
 
     public static final Set<String> VECTOR_COMPUTE_FUNCTIONS =

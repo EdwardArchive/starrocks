@@ -22,20 +22,20 @@
 
 namespace starrocks {
 
-// State structure for URL function
+// State structure for HTTP request function
 // Stores only the global admin-enforced SSL verification setting
-struct UrlFunctionState {
+struct HttpRequestFunctionState {
     bool ssl_verify_required;     // Admin-enforced SSL verification (global setting from Config)
 };
 
-class UrlFunctions {
+class HttpRequestFunctions {
 public:
     /**
-     * URL function with JSON config string
+     * HTTP request function with JSON config string
      *
      * Signature:
-     * - url(url VARCHAR) -> VARCHAR
-     * - url(url VARCHAR, config VARCHAR) -> VARCHAR
+     * - http_request(url VARCHAR) -> VARCHAR
+     * - http_request(url VARCHAR, config VARCHAR) -> VARCHAR
      *
      * Config JSON format:
      * {
@@ -48,21 +48,21 @@ public:
      *     "password": "pass"                       // default: null
      * }
      */
-    DEFINE_VECTORIZED_FN(url);
+    DEFINE_VECTORIZED_FN(http_request);
 
-    DEFINE_VECTORIZED_FN(url_with_config);
+    DEFINE_VECTORIZED_FN(http_request_with_config);
 
     /**
      * Prepare function - Called once per fragment
-     * Reads global Config and initializes UrlFunctionState
+     * Reads global Config and initializes HttpRequestFunctionState
      */
-    static Status url_prepare(FunctionContext* context, FunctionContext::FunctionStateScope scope);
+    static Status http_request_prepare(FunctionContext* context, FunctionContext::FunctionStateScope scope);
 
     /**
      * Close function - Called once per fragment
      * Cleanup resources allocated in prepare
      */
-    static Status url_close(FunctionContext* context, FunctionContext::FunctionStateScope scope);
+    static Status http_request_close(FunctionContext* context, FunctionContext::FunctionStateScope scope);
 };
 
 } // namespace starrocks

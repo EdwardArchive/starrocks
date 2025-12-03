@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "exprs/url_functions.h"
+#include "exprs/http_request_functions.h"
 
 #include <fmt/format.h>
 #include <simdjson.h>
@@ -29,8 +29,14 @@
 
 namespace starrocks {
 
-// URL configuration parsed from JSON config string
-struct UrlConfig {
+// HTTP Request Function Implementation
+//
+// Usage:
+//   SELECT http_request('https://api.example.com/data');
+//   SELECT http_request('https://api.example.com', '{"method": "POST", "body": "{}"}');
+
+// HTTP request configuration parsed from JSON config string
+struct HttpRequestConfig {
     std::string method = "GET";
     std::map<std::string, std::string> headers;
     std::string body;
@@ -40,7 +46,7 @@ struct UrlConfig {
     std::string password;
 };
 
-// Default values for URL function configuration
+// Default values for HTTP request function configuration
 const int64_t DEFAULT_MAX_RESPONSE_SIZE = 1048576;  // 1MB
 
 // Helper function: Parse HTTP method from string
@@ -127,9 +133,9 @@ static std::string escape_json_string(const std::string& s) {
     return result;
 }
 
-// Helper function: Parse JSON config string into UrlConfig struct
-static StatusOr<UrlConfig> parse_config(const std::string& config_json) {
-    UrlConfig config;
+// Helper function: Parse JSON config string into HttpRequestConfig struct
+static StatusOr<HttpRequestConfig> parse_config(const std::string& config_json) {
+    HttpRequestConfig config;
 
     simdjson::ondemand::parser parser;
     simdjson::padded_string padded(config_json);
@@ -195,7 +201,7 @@ static StatusOr<UrlConfig> parse_config(const std::string& config_json) {
         }
     }
 
-    // body: If it’s an object/array, stringify it; if it’s a string, leave it as is.
+    // body: If it's an object/array, stringify it; if it's a string, leave it as is.
     simdjson::ondemand::value body_val;
     if (obj["body"].get(body_val) == simdjson::SUCCESS) {
         auto body_type = body_val.type();
@@ -256,9 +262,9 @@ static std::string build_json_error_response(const std::string& error_message) {
     return fmt::format(R"({{"status": -1, "body": null, "error": "{}"}})", escape_json_string(error_message));
 }
 
-// Helper function: Execute HTTP request with UrlConfig
-static StatusOr<std::string> execute_http_request_with_config(HttpClient& client, const Slice& url_slice, const UrlConfig& config,
-                                                               const UrlFunctionState* state) {
+// Helper function: Execute HTTP request with HttpRequestConfig
+static StatusOr<std::string> execute_http_request_with_config(HttpClient& client, const Slice& url_slice, const HttpRequestConfig& config,
+                                                               const HttpRequestFunctionState* state) {
     // Initialize with URL
     std::string url_str = url_slice.to_string();
     Status init_status = client.init(url_str);
@@ -332,15 +338,15 @@ static StatusOr<std::string> execute_http_request_with_config(HttpClient& client
 }
 
 // Prepare function: Initialize state
-Status UrlFunctions::url_prepare(FunctionContext* context, FunctionContext::FunctionStateScope scope) {
+Status HttpRequestFunctions::http_request_prepare(FunctionContext* context, FunctionContext::FunctionStateScope scope) {
     if (scope != FunctionContext::FRAGMENT_LOCAL) {
         return Status::OK();
     }
 
-    auto* state = new UrlFunctionState();
+    auto* state = new HttpRequestFunctionState();
 
-    // Get FE's Config.url_ssl_verification_required value from RuntimeState
-    // When admin sets url_ssl_verification_required=true, ssl_verify=false in JSON config is ignored
+    // Get FE's Config.http_request_ssl_verification_required value from RuntimeState
+    // When admin sets http_request_ssl_verification_required=true, ssl_verify=false in JSON config is ignored
     RuntimeState* runtime_state = context->state();
     if (runtime_state != nullptr) {
         state->ssl_verify_required = runtime_state->url_ssl_verification_required();
@@ -353,12 +359,12 @@ Status UrlFunctions::url_prepare(FunctionContext* context, FunctionContext::Func
 }
 
 // Close function: Cleanup resources
-Status UrlFunctions::url_close(FunctionContext* context, FunctionContext::FunctionStateScope scope) {
+Status HttpRequestFunctions::http_request_close(FunctionContext* context, FunctionContext::FunctionStateScope scope) {
     if (scope != FunctionContext::FRAGMENT_LOCAL) {
         return Status::OK();
     }
 
-    auto* state = reinterpret_cast<UrlFunctionState*>(context->get_function_state(scope));
+    auto* state = reinterpret_cast<HttpRequestFunctionState*>(context->get_function_state(scope));
     if (state != nullptr) {
         delete state;
     }
@@ -366,17 +372,17 @@ Status UrlFunctions::url_close(FunctionContext* context, FunctionContext::Functi
     return Status::OK();
 }
 
-// Main URL function implementation (1-arg: simple GET request)
-StatusOr<ColumnPtr> UrlFunctions::url(FunctionContext* context, const Columns& columns) {
+// Main HTTP request function implementation (1-arg: simple GET request)
+StatusOr<ColumnPtr> HttpRequestFunctions::http_request(FunctionContext* context, const Columns& columns) {
     RETURN_IF_COLUMNS_ONLY_NULL(columns);
 
     size_t num_rows = columns[0]->size();
 
     // Get function state
-    auto* state = reinterpret_cast<UrlFunctionState*>(
+    auto* state = reinterpret_cast<HttpRequestFunctionState*>(
             context->get_function_state(FunctionContext::FRAGMENT_LOCAL));
     if (state == nullptr) {
-        return Status::InternalError("URL function state not initialized");
+        return Status::InternalError("HTTP request function state not initialized");
     }
 
     // Create ColumnViewer outside the loop for better performance
@@ -386,7 +392,7 @@ StatusOr<ColumnPtr> UrlFunctions::url(FunctionContext* context, const Columns& c
     ColumnBuilder<TYPE_VARCHAR> result(num_rows);
 
     // Default config for simple GET request
-    UrlConfig default_config;
+    HttpRequestConfig default_config;
 
     // Reuse HttpClient across rows for better performance
     HttpClient client;
@@ -414,18 +420,18 @@ StatusOr<ColumnPtr> UrlFunctions::url(FunctionContext* context, const Columns& c
     return result.build(ColumnHelper::is_all_const(columns));
 }
 
-// URL function with JSON config string (2-arg overload)
-// url(url, config_json)
-StatusOr<ColumnPtr> UrlFunctions::url_with_config(FunctionContext* context, const Columns& columns) {
+// HTTP request function with JSON config string (2-arg overload)
+// http_request(url, config_json)
+StatusOr<ColumnPtr> HttpRequestFunctions::http_request_with_config(FunctionContext* context, const Columns& columns) {
     RETURN_IF_COLUMNS_ONLY_NULL(columns);
 
     size_t num_rows = columns[0]->size();
 
     // Get function state
     auto* state =
-            reinterpret_cast<UrlFunctionState*>(context->get_function_state(FunctionContext::FRAGMENT_LOCAL));
+            reinterpret_cast<HttpRequestFunctionState*>(context->get_function_state(FunctionContext::FRAGMENT_LOCAL));
     if (state == nullptr) {
-        return Status::InternalError("URL function state not initialized");
+        return Status::InternalError("HTTP request function state not initialized");
     }
 
     // Create ColumnViewers outside the loop for better performance
@@ -434,7 +440,7 @@ StatusOr<ColumnPtr> UrlFunctions::url_with_config(FunctionContext* context, cons
 
     // Cache constant config to avoid repeated parsing
     bool config_is_const = columns[1]->is_constant();
-    std::optional<UrlConfig> const_config;
+    std::optional<HttpRequestConfig> const_config;
 
     if (config_is_const && !config_viewer.is_null(0)) {
         Slice config_slice = config_viewer.value(0);
@@ -448,7 +454,7 @@ StatusOr<ColumnPtr> UrlFunctions::url_with_config(FunctionContext* context, cons
     ColumnBuilder<TYPE_VARCHAR> result(num_rows);
 
     // Default config for fallback
-    UrlConfig default_config;
+    HttpRequestConfig default_config;
 
     // Reuse HttpClient across rows for better performance
     HttpClient client;
@@ -462,7 +468,7 @@ StatusOr<ColumnPtr> UrlFunctions::url_with_config(FunctionContext* context, cons
         Slice url_slice = url_viewer.value(i);
 
         // Determine which config to use
-        UrlConfig config;
+        HttpRequestConfig config;
         if (const_config.has_value()) {
             // Use cached constant config
             config = const_config.value();
@@ -497,4 +503,4 @@ StatusOr<ColumnPtr> UrlFunctions::url_with_config(FunctionContext* context, cons
 
 } // namespace starrocks
 
-#include "gen_cpp/opcode/UrlFunctions.inc"
+#include "gen_cpp/opcode/HttpRequestFunctions.inc"
