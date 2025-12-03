@@ -31,9 +31,20 @@ namespace starrocks {
 
 // HTTP Request Function Implementation
 //
-// Usage:
-//   SELECT http_request('https://api.example.com/data');
-//   SELECT http_request('https://api.example.com', '{"method": "POST", "body": "{}"}');
+// Usage with Named Parameters:
+//   SELECT http_request(url => 'https://api.example.com/data');
+//   SELECT http_request(url => 'https://api.example.com', method => 'POST', body => '{}');
+//   SELECT http_request(url => 'https://api.example.com', headers => '{"Authorization": "Bearer token"}');
+//
+// Parameters:
+//   url (VARCHAR, required) - The URL to request
+//   method (VARCHAR, default: 'GET') - HTTP method (GET, POST, PUT, DELETE, HEAD, OPTIONS)
+//   body (VARCHAR, default: '') - Request body
+//   headers (VARCHAR, default: '{}') - JSON object of headers
+//   timeout_ms (INT, default: 30000) - Request timeout in milliseconds
+//   ssl_verify (BOOLEAN, default: true) - Whether to verify SSL certificates
+//   username (VARCHAR, default: '') - Basic auth username
+//   password (VARCHAR, default: '') - Basic auth password
 
 // HTTP request configuration parsed from JSON config string
 struct HttpRequestConfig {
@@ -133,96 +144,40 @@ static std::string escape_json_string(const std::string& s) {
     return result;
 }
 
-// Helper function: Parse JSON config string into HttpRequestConfig struct
-static StatusOr<HttpRequestConfig> parse_config(const std::string& config_json) {
-    HttpRequestConfig config;
+// Helper function: Parse headers JSON string into map
+static StatusOr<std::map<std::string, std::string>> parse_headers_json(const std::string& headers_json) {
+    std::map<std::string, std::string> headers;
+
+    if (headers_json.empty() || headers_json == "{}") {
+        return headers;
+    }
 
     simdjson::ondemand::parser parser;
-    simdjson::padded_string padded(config_json);
+    simdjson::padded_string padded(headers_json);
 
     auto doc_result = parser.iterate(padded);
     if (doc_result.error()) {
         return Status::InvalidArgument(
-                fmt::format("Invalid JSON config: {}", simdjson::error_message(doc_result.error())));
+                fmt::format("Invalid headers JSON: {}", simdjson::error_message(doc_result.error())));
     }
 
     simdjson::ondemand::document doc = std::move(doc_result.value());
     simdjson::ondemand::object obj;
     if (doc.get_object().get(obj)) {
-        return Status::InvalidArgument("Config must be a JSON object");
+        return Status::InvalidArgument("Headers must be a JSON object");
     }
 
-    // method
-    std::string_view method_sv;
-    if (obj["method"].get_string().get(method_sv) == simdjson::SUCCESS) {
-        config.method = std::string(method_sv);
-    }
-
-    // timeout_ms with bounds checking to prevent integer overflow
-    int64_t timeout;
-    if (obj["timeout_ms"].get_int64().get(timeout) == simdjson::SUCCESS) {
-        // Clamp to valid range: 1ms to 5 minutes (300,000ms)
-        constexpr int64_t MIN_TIMEOUT_MS = 1;
-        constexpr int64_t MAX_TIMEOUT_MS = 300000;
-        if (timeout < MIN_TIMEOUT_MS) {
-            timeout = MIN_TIMEOUT_MS;
-        } else if (timeout > MAX_TIMEOUT_MS) {
-            timeout = MAX_TIMEOUT_MS;
-        }
-        config.timeout_ms = static_cast<int32_t>(timeout);
-    }
-
-    // ssl_verify
-    bool ssl_verify;
-    if (obj["ssl_verify"].get_bool().get(ssl_verify) == simdjson::SUCCESS) {
-        config.ssl_verify = ssl_verify;
-    }
-
-    // username, password
-    std::string_view username_sv, password_sv;
-    if (obj["username"].get_string().get(username_sv) == simdjson::SUCCESS) {
-        config.username = std::string(username_sv);
-    }
-    if (obj["password"].get_string().get(password_sv) == simdjson::SUCCESS) {
-        config.password = std::string(password_sv);
-    }
-
-    // headers (object)
-    simdjson::ondemand::object headers_obj;
-    if (obj["headers"].get_object().get(headers_obj) == simdjson::SUCCESS) {
-        for (auto field : headers_obj) {
-            auto key_result = field.escaped_key();
-            if (key_result.error() != simdjson::SUCCESS) continue;
-            std::string_view key = key_result.value();
-            std::string_view value;
-            if (field.value().get_string().get(value) == simdjson::SUCCESS) {
-                config.headers[std::string(key)] = std::string(value);
-            }
+    for (auto field : obj) {
+        auto key_result = field.escaped_key();
+        if (key_result.error() != simdjson::SUCCESS) continue;
+        std::string_view key = key_result.value();
+        std::string_view value;
+        if (field.value().get_string().get(value) == simdjson::SUCCESS) {
+            headers[std::string(key)] = std::string(value);
         }
     }
 
-    // body: If it's an object/array, stringify it; if it's a string, leave it as is.
-    simdjson::ondemand::value body_val;
-    if (obj["body"].get(body_val) == simdjson::SUCCESS) {
-        auto body_type = body_val.type();
-        if (body_type.error() == simdjson::SUCCESS) {
-            if (body_type.value() == simdjson::ondemand::json_type::object ||
-                body_type.value() == simdjson::ondemand::json_type::array) {
-                // JSON stringify
-                auto json_str = simdjson::to_json_string(body_val);
-                if (json_str.error() == simdjson::SUCCESS) {
-                    config.body = std::string(json_str.value());
-                }
-            } else if (body_type.value() == simdjson::ondemand::json_type::string) {
-                // string
-                std::string_view body_sv;
-                if (body_val.get_string().get(body_sv) == simdjson::SUCCESS) {
-                    config.body = std::string(body_sv);
-                }
-            }
-        }
-    }
-    return config;
+    return headers;
 }
 
 // Helper function: Check if string is valid JSON using simdjson
@@ -378,9 +333,16 @@ Status HttpRequestFunctions::http_request_close(FunctionContext* context, Functi
     return Status::OK();
 }
 
-// Main HTTP request function implementation (1-arg: simple GET request)
+// Main HTTP request function implementation with Named Parameters
+// http_request(url, method, body, headers, timeout_ms, ssl_verify, username, password)
 StatusOr<ColumnPtr> HttpRequestFunctions::http_request(FunctionContext* context, const Columns& columns) {
     RETURN_IF_COLUMNS_ONLY_NULL(columns);
+
+    // Expect 8 columns: url, method, body, headers, timeout_ms, ssl_verify, username, password
+    if (columns.size() != 8) {
+        return Status::InternalError(
+                fmt::format("http_request expects 8 arguments, got {}", columns.size()));
+    }
 
     size_t num_rows = columns[0]->size();
 
@@ -391,17 +353,25 @@ StatusOr<ColumnPtr> HttpRequestFunctions::http_request(FunctionContext* context,
         return Status::InternalError("HTTP request function state not initialized");
     }
 
-    // Create ColumnViewer outside the loop for better performance
+    // Create ColumnViewers for all parameters
     auto url_viewer = ColumnViewer<TYPE_VARCHAR>(columns[0]);
+    auto method_viewer = ColumnViewer<TYPE_VARCHAR>(columns[1]);
+    auto body_viewer = ColumnViewer<TYPE_VARCHAR>(columns[2]);
+    auto headers_viewer = ColumnViewer<TYPE_VARCHAR>(columns[3]);
+    auto timeout_viewer = ColumnViewer<TYPE_INT>(columns[4]);
+    auto ssl_verify_viewer = ColumnViewer<TYPE_BOOLEAN>(columns[5]);
+    auto username_viewer = ColumnViewer<TYPE_VARCHAR>(columns[6]);
+    auto password_viewer = ColumnViewer<TYPE_VARCHAR>(columns[7]);
 
     // Build result column
     ColumnBuilder<TYPE_VARCHAR> result(num_rows);
 
-    // Default config for simple GET request
-    HttpRequestConfig default_config;
-
     // Reuse HttpClient across rows for better performance
     HttpClient client;
+
+    // Timeout bounds
+    constexpr int32_t MIN_TIMEOUT_MS = 1;
+    constexpr int32_t MAX_TIMEOUT_MS = 300000;
 
     // Process each row
     for (size_t i = 0; i < num_rows; i++) {
@@ -409,92 +379,63 @@ StatusOr<ColumnPtr> HttpRequestFunctions::http_request(FunctionContext* context,
             result.append_null();
             continue;
         }
-        Slice url_slice = url_viewer.value(i);
 
-        // Execute simple GET request with default config
-        auto response = execute_http_request_with_config(client, url_slice, default_config, state);
-
-        if (!response.ok()) {
-            result.append_null();
-            context->add_warning(std::string(response.status().message()).c_str());
-            continue;
-        }
-
-        result.append(Slice(response.value()));
-    }
-
-    return result.build(ColumnHelper::is_all_const(columns));
-}
-
-// HTTP request function with JSON config string (2-arg overload)
-// http_request(url, config_json)
-StatusOr<ColumnPtr> HttpRequestFunctions::http_request_with_config(FunctionContext* context, const Columns& columns) {
-    RETURN_IF_COLUMNS_ONLY_NULL(columns);
-
-    size_t num_rows = columns[0]->size();
-
-    // Get function state
-    auto* state =
-            reinterpret_cast<HttpRequestFunctionState*>(context->get_function_state(FunctionContext::FRAGMENT_LOCAL));
-    if (state == nullptr) {
-        return Status::InternalError("HTTP request function state not initialized");
-    }
-
-    // Create ColumnViewers outside the loop for better performance
-    auto url_viewer = ColumnViewer<TYPE_VARCHAR>(columns[0]);
-    auto config_viewer = ColumnViewer<TYPE_VARCHAR>(columns[1]);
-
-    // Cache constant config to avoid repeated parsing
-    bool config_is_const = columns[1]->is_constant();
-    std::optional<HttpRequestConfig> const_config;
-
-    if (config_is_const && !config_viewer.is_null(0)) {
-        Slice config_slice = config_viewer.value(0);
-        auto config_result = parse_config(config_slice.to_string());
-        if (config_result.ok()) {
-            const_config = config_result.value();
-        }
-    }
-
-    // Build result column
-    ColumnBuilder<TYPE_VARCHAR> result(num_rows);
-
-    // Default config for fallback
-    HttpRequestConfig default_config;
-
-    // Reuse HttpClient across rows for better performance
-    HttpClient client;
-
-    // Process each row
-    for (size_t i = 0; i < num_rows; i++) {
-        if (url_viewer.is_null(i)) {
-            result.append_null();
-            continue;
-        }
-        Slice url_slice = url_viewer.value(i);
-
-        // Determine which config to use
+        // Build config from individual columns
         HttpRequestConfig config;
-        if (const_config.has_value()) {
-            // Use cached constant config
-            config = const_config.value();
-        } else if (config_viewer.is_null(i)) {
-            // No config provided, use defaults
-            config = default_config;
-        } else {
-            // Parse config for this row
-            Slice config_slice = config_viewer.value(i);
-            auto config_result = parse_config(config_slice.to_string());
-            if (!config_result.ok()) {
-                // Return JSON error response instead of NULL for better usability
-                result.append(Slice(build_json_error_response("Failed to parse config: invalid JSON format")));
+
+        // url (required)
+        Slice url_slice = url_viewer.value(i);
+
+        // method (default: 'GET')
+        if (!method_viewer.is_null(i)) {
+            config.method = method_viewer.value(i).to_string();
+        }
+
+        // body (default: '')
+        if (!body_viewer.is_null(i)) {
+            config.body = body_viewer.value(i).to_string();
+        }
+
+        // headers (default: '{}')
+        if (!headers_viewer.is_null(i)) {
+            std::string headers_json = headers_viewer.value(i).to_string();
+            auto headers_result = parse_headers_json(headers_json);
+            if (!headers_result.ok()) {
+                result.append(Slice(build_json_error_response("Invalid headers JSON format")));
                 continue;
             }
-            config = config_result.value();
+            config.headers = headers_result.value();
+        }
+
+        // timeout_ms (default: 30000, clamped to [1, 300000])
+        if (!timeout_viewer.is_null(i)) {
+            int32_t timeout = timeout_viewer.value(i);
+            if (timeout < MIN_TIMEOUT_MS) {
+                timeout = MIN_TIMEOUT_MS;
+            } else if (timeout > MAX_TIMEOUT_MS) {
+                timeout = MAX_TIMEOUT_MS;
+            }
+            config.timeout_ms = timeout;
+        }
+
+        // ssl_verify (default: true)
+        if (!ssl_verify_viewer.is_null(i)) {
+            config.ssl_verify = ssl_verify_viewer.value(i);
+        }
+
+        // username (default: '')
+        if (!username_viewer.is_null(i)) {
+            config.username = username_viewer.value(i).to_string();
+        }
+
+        // password (default: '')
+        if (!password_viewer.is_null(i)) {
+            config.password = password_viewer.value(i).to_string();
         }
 
         // Execute HTTP request with config
         auto response = execute_http_request_with_config(client, url_slice, config, state);
+
         if (!response.ok()) {
             result.append_null();
             context->add_warning(std::string(response.status().message()).c_str());

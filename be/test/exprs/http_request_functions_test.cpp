@@ -40,6 +40,73 @@ protected:
         _runtime_state.reset();
     }
 
+    // Helper function to create 8-column input for http_request function
+    // Columns: url, method, body, headers, timeout_ms, ssl_verify, username, password
+    Columns create_http_request_columns(const ColumnPtr& url_column, size_t num_rows) {
+        Columns columns;
+        columns.emplace_back(url_column);
+
+        // method (default: 'GET')
+        auto method_column = BinaryColumn::create();
+        for (size_t i = 0; i < num_rows; i++) {
+            method_column->append("GET");
+        }
+        columns.emplace_back(method_column);
+
+        // body (default: '')
+        auto body_column = BinaryColumn::create();
+        for (size_t i = 0; i < num_rows; i++) {
+            body_column->append("");
+        }
+        columns.emplace_back(body_column);
+
+        // headers (default: '{}')
+        auto headers_column = BinaryColumn::create();
+        for (size_t i = 0; i < num_rows; i++) {
+            headers_column->append("{}");
+        }
+        columns.emplace_back(headers_column);
+
+        // timeout_ms (default: 30000)
+        auto timeout_column = Int32Column::create();
+        for (size_t i = 0; i < num_rows; i++) {
+            timeout_column->append(30000);
+        }
+        columns.emplace_back(timeout_column);
+
+        // ssl_verify (default: true)
+        auto ssl_verify_column = BooleanColumn::create();
+        for (size_t i = 0; i < num_rows; i++) {
+            ssl_verify_column->append(true);
+        }
+        columns.emplace_back(ssl_verify_column);
+
+        // username (default: '')
+        auto username_column = BinaryColumn::create();
+        for (size_t i = 0; i < num_rows; i++) {
+            username_column->append("");
+        }
+        columns.emplace_back(username_column);
+
+        // password (default: '')
+        auto password_column = BinaryColumn::create();
+        for (size_t i = 0; i < num_rows; i++) {
+            password_column->append("");
+        }
+        columns.emplace_back(password_column);
+
+        return columns;
+    }
+
+    // Helper to create 8 null columns for null input test
+    Columns create_null_columns(size_t num_rows) {
+        Columns columns;
+        for (int i = 0; i < 8; i++) {
+            columns.emplace_back(ColumnHelper::create_const_null_column(num_rows));
+        }
+        return columns;
+    }
+
     std::unique_ptr<RuntimeState> _runtime_state;
     std::unique_ptr<FunctionContext> _ctx;
 };
@@ -62,14 +129,13 @@ PARALLEL_TEST_F(HttpRequestFunctionsTest, prepareCloseTest) {
     ASSERT_OK(HttpRequestFunctions::http_request_close(_ctx.get(), scope));
 }
 
-// Test NULL input handling
+// Test NULL input handling - when URL is NULL, result should be NULL
 PARALLEL_TEST_F(HttpRequestFunctionsTest, nullInputTest) {
     FunctionContext::FunctionStateScope scope = FunctionContext::FRAGMENT_LOCAL;
     ASSERT_OK(HttpRequestFunctions::http_request_prepare(_ctx.get(), scope));
 
-    Columns columns;
-    auto null_column = ColumnHelper::create_const_null_column(10);
-    columns.emplace_back(null_column);
+    // Create 8 null columns (url, method, body, headers, timeout_ms, ssl_verify, username, password)
+    Columns columns = create_null_columns(10);
 
     auto result = HttpRequestFunctions::http_request(_ctx.get(), columns);
     ASSERT_TRUE(result.ok());
@@ -79,38 +145,50 @@ PARALLEL_TEST_F(HttpRequestFunctionsTest, nullInputTest) {
     ASSERT_OK(HttpRequestFunctions::http_request_close(_ctx.get(), scope));
 }
 
-// Test empty URL
+// Test empty URL - returns JSON error response with status -1
 PARALLEL_TEST_F(HttpRequestFunctionsTest, emptyUrlTest) {
     FunctionContext::FunctionStateScope scope = FunctionContext::FRAGMENT_LOCAL;
     ASSERT_OK(HttpRequestFunctions::http_request_prepare(_ctx.get(), scope));
 
-    Columns columns;
+    // Create URL column with empty string
     auto url_column = BinaryColumn::create();
     url_column->append("");
-    columns.emplace_back(url_column);
+    Columns columns = create_http_request_columns(url_column, 1);
 
     auto result = HttpRequestFunctions::http_request(_ctx.get(), columns);
     ASSERT_TRUE(result.ok());
-    // Empty URL should return NULL
-    ASSERT_TRUE(result.value()->is_null(0));
+    ASSERT_EQ(1, result.value()->size());
+    // Empty URL returns JSON error response, not NULL
+    ASSERT_FALSE(result.value()->is_null(0));
+    // Response should contain status -1 (error)
+    auto* binary_col = ColumnHelper::get_binary_column(result.value().get());
+    std::string response = binary_col->get_slice(0).to_string();
+    ASSERT_TRUE(response.find("\"status\": -1") != std::string::npos ||
+                response.find("\"status\":-1") != std::string::npos);
 
     ASSERT_OK(HttpRequestFunctions::http_request_close(_ctx.get(), scope));
 }
 
-// Test invalid URL format
+// Test invalid URL format - returns JSON error response with status -1
 PARALLEL_TEST_F(HttpRequestFunctionsTest, invalidUrlTest) {
     FunctionContext::FunctionStateScope scope = FunctionContext::FRAGMENT_LOCAL;
     ASSERT_OK(HttpRequestFunctions::http_request_prepare(_ctx.get(), scope));
 
-    Columns columns;
+    // Create URL column with invalid URL
     auto url_column = BinaryColumn::create();
     url_column->append("not a valid url");
-    columns.emplace_back(url_column);
+    Columns columns = create_http_request_columns(url_column, 1);
 
     auto result = HttpRequestFunctions::http_request(_ctx.get(), columns);
     ASSERT_TRUE(result.ok());
-    // Invalid URL should return NULL with warning
-    ASSERT_TRUE(result.value()->is_null(0));
+    ASSERT_EQ(1, result.value()->size());
+    // Invalid URL returns JSON error response, not NULL
+    ASSERT_FALSE(result.value()->is_null(0));
+    // Response should contain status -1 (error)
+    auto* binary_col = ColumnHelper::get_binary_column(result.value().get());
+    std::string response = binary_col->get_slice(0).to_string();
+    ASSERT_TRUE(response.find("\"status\": -1") != std::string::npos ||
+                response.find("\"status\":-1") != std::string::npos);
 
     ASSERT_OK(HttpRequestFunctions::http_request_close(_ctx.get(), scope));
 }

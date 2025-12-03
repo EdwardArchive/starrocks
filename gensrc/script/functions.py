@@ -439,10 +439,11 @@ vectorized_functions = [
 
     [30460, 'format_bytes', True, False, 'VARCHAR', ['BIGINT'], 'StringFunctions::format_bytes'],
 
-    # HTTP Request function - HTTP/HTTPS request scalar function
-    [30470, 'http_request', True, False, 'VARCHAR', ['VARCHAR'], 'HttpRequestFunctions::http_request',
-     'HttpRequestFunctions::http_request_prepare', 'HttpRequestFunctions::http_request_close'],
-    [30471, 'http_request', True, False, 'VARCHAR', ['VARCHAR', 'VARCHAR'], 'HttpRequestFunctions::http_request_with_config',
+    # HTTP Request function - HTTP/HTTPS request scalar function with Named Parameters
+    # http_request(url, method, body, headers, timeout_ms, ssl_verify, username, password)
+    [30470, 'http_request', True, False, 'VARCHAR',
+     ['VARCHAR', 'VARCHAR', 'VARCHAR', 'VARCHAR', 'INT', 'BOOLEAN', 'VARCHAR', 'VARCHAR'],
+     'HttpRequestFunctions::http_request',
      'HttpRequestFunctions::http_request_prepare', 'HttpRequestFunctions::http_request_close'],
 
     # Binary Functions

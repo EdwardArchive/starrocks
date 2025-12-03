@@ -72,6 +72,7 @@ import com.starrocks.type.VarcharType;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -805,6 +806,53 @@ public class FunctionAnalyzer {
             }
         }
         return fn;
+    }
+
+    /**
+     * Get function by function call expression with named arguments.
+     * Searches for a function that supports the given named arguments.
+     *
+     * @param session          current connect context
+     * @param node             function call expression
+     * @param argumentTypes    argument types
+     * @param exprsNames       list of named argument names
+     * @return function if it's found and supports named args, otherwise return null
+     */
+    public static Function getAnalyzedFunctionForNamedArgs(ConnectContext session,
+                                                           FunctionCallExpr node,
+                                                           Type[] argumentTypes,
+                                                           List<String> exprsNames) {
+        String fnName = node.getFnName().getFunction();
+        // Find function using named arguments directly
+        String[] argNames = exprsNames.toArray(new String[0]);
+        Function fn = ExprUtils.getBuiltinFunction(fnName, argumentTypes, argNames,
+                Function.CompareMode.IS_NONSTRICT_SUPERTYPE_OF);
+        // Validate that the function supports named arguments
+        if (fn != null && !fn.hasNamedArg()) {
+            return null;
+        }
+        // Validate named argument names match function definition
+        if (fn != null && !isNamedArgsMatch(fn, exprsNames)) {
+            return null;
+        }
+        return fn;
+    }
+
+    /**
+     * Check if the named arguments match the function's argument names.
+     */
+    private static boolean isNamedArgsMatch(Function fn, List<String> exprsNames) {
+        String[] fnArgNames = fn.getArgNames();
+        if (fnArgNames == null) {
+            return false;
+        }
+        Set<String> validNames = new HashSet<>(Arrays.asList(fnArgNames));
+        for (String name : exprsNames) {
+            if (!validNames.contains(name)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

@@ -31,26 +31,25 @@ struct HttpRequestFunctionState {
 class HttpRequestFunctions {
 public:
     /**
-     * HTTP request function with JSON config string
+     * HTTP request function with Named Parameters
      *
      * Signature:
-     * - http_request(url VARCHAR) -> VARCHAR
-     * - http_request(url VARCHAR, config VARCHAR) -> VARCHAR
+     *   http_request(
+     *     url VARCHAR,           -- Required: The URL to request
+     *     method VARCHAR,        -- Default: 'GET'
+     *     body VARCHAR,          -- Default: ''
+     *     headers VARCHAR,       -- Default: '{}' (JSON object)
+     *     timeout_ms INT,        -- Default: 30000
+     *     ssl_verify BOOLEAN,    -- Default: true
+     *     username VARCHAR,      -- Default: ''
+     *     password VARCHAR       -- Default: ''
+     *   ) -> VARCHAR
      *
-     * Config JSON format:
-     * {
-     *     "method": "GET|POST|PUT|DELETE",  // default: "GET"
-     *     "headers": {"key": "value", ...},        // default: {}
-     *     "body": <string|object>,                 // default: null (object auto-stringify)
-     *     "timeout_ms": 30000,                     // default: 30000
-     *     "ssl_verify": true,                      // default: true
-     *     "username": "user",                      // default: null
-     *     "password": "pass"                       // default: null
-     * }
+     * Usage:
+     *   SELECT http_request(url => 'https://api.example.com');
+     *   SELECT http_request(url => 'https://api.example.com', method => 'POST', body => '{}');
      */
     DEFINE_VECTORIZED_FN(http_request);
-
-    DEFINE_VECTORIZED_FN(http_request_with_config);
 
     /**
      * Prepare function - Called once per fragment

@@ -967,6 +967,33 @@ public class ExpressionAnalyzer {
             Type[] argumentTypes = node.getChildren().stream().map(Expr::getType).toArray(Type[]::new);
             // check fn & throw exception direct if analyze failed
             checkFunction(fnName, node, argumentTypes);
+            // Handle named arguments reordering before function lookup
+            List<String> exprsNames = node.getParams().getExprsNames();
+            if (exprsNames != null && !exprsNames.isEmpty()) {
+                // Named arguments are used - we need to find the function first, then reorder
+                Function fn = FunctionAnalyzer.getAnalyzedFunctionForNamedArgs(session, node, argumentTypes, exprsNames);
+                if (fn == null) {
+                    String msg = String.format("No matching function with signature: %s(%s)",
+                            fnName, node.getParams().getNamedArgStr());
+                    throw new SemanticException(msg, node.getPos());
+                }
+                // Reorder arguments according to function definition
+                node.getParams().reorderNamedArgAndAppendDefaults(fn);
+                // Update children to match reordered params
+                node.clearChildren();
+                node.addChildren(node.getParams().exprs());
+                // Re-analyze children after reordering
+                for (Expr child : node.getChildren()) {
+                    if (!child.isAnalyzed()) {
+                        visit(child, scope);
+                    }
+                }
+                node.setFn(fn);
+                node.setType(fn.getReturnType());
+                FunctionAnalyzer.analyze(node);
+                return null;
+            }
+
             // get function by function expression and argument types
             Function fn = FunctionAnalyzer.getAnalyzedFunction(session, node, argumentTypes);
             if (fn == null) {
