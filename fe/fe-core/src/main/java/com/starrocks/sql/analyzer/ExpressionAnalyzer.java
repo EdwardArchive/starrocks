@@ -139,11 +139,6 @@ import static com.starrocks.sql.analyzer.AnalyticAnalyzer.verifyAnalyticExpressi
 import static com.starrocks.sql.parser.ErrorMsgProxy.PARSER_ERROR_MSG;
 
 public class ExpressionAnalyzer {
-    // Parameter names must match those defined in functions.py for http_request
-    private static final Set<String> HTTP_REQUEST_VALID_PARAMS = Set.of(
-            "url", "method", "body", "headers",
-            "timeout_ms", "ssl_verify", "username", "password");
-
     private final ConnectContext session;
 
     public ExpressionAnalyzer(ConnectContext session) {
@@ -1368,20 +1363,36 @@ public class ExpressionAnalyzer {
                 case FunctionSet.HTTP_REQUEST: {
                     List<String> exprsNames = node.getParams().getExprsNames();
                     if (exprsNames != null && !exprsNames.isEmpty()) {
-                        // Named parameters - check for unknown parameter names
+                        // Get valid parameter names from function definition
+                        Function fn = ExprUtils.getBuiltinFunction(FunctionSet.HTTP_REQUEST,
+                                argumentTypes, Function.CompareMode.IS_NONSTRICT_SUPERTYPE_OF);
+                        if (fn == null || !fn.hasNamedArg()) {
+                            throw new SemanticException("http_request() does not support named parameters");
+                        }
+                        Set<String> validParams = Set.of(fn.getArgNames());
+
+                        // Check for duplicate and unknown parameter names
+                        Set<String> seen = new HashSet<>();
                         for (String paramName : exprsNames) {
-                            if (!HTTP_REQUEST_VALID_PARAMS.contains(paramName)) {
+                            if (!seen.add(paramName)) {
+                                throw new SemanticException(String.format(
+                                        "http_request() duplicate parameter '%s'", paramName));
+                            }
+                            if (!validParams.contains(paramName)) {
                                 throw new SemanticException(String.format(
                                         "http_request() does not support parameter '%s'", paramName));
                             }
                         }
                     } else {
-                        // Positional parameters - check argument count
+                        // Positional parameters - get expected count from function definition
+                        Function fn = ExprUtils.getBuiltinFunction(FunctionSet.HTTP_REQUEST,
+                                argumentTypes, Function.CompareMode.IS_NONSTRICT_SUPERTYPE_OF);
+                        int expectedArgs = (fn != null) ? fn.getNumArgs() : 8;
                         int argCount = node.getChildren().size();
-                        if (argCount != 8) {
+                        if (argCount != expectedArgs) {
                             throw new SemanticException(String.format(
-                                    "http_request() expects 8 parameters but got %d",
-                                    argCount));
+                                    "http_request() expects %d parameters but got %d",
+                                    expectedArgs, argCount));
                         }
                     }
                     break;

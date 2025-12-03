@@ -335,9 +335,8 @@ Status HttpRequestFunctions::http_request_close(FunctionContext* context, Functi
 
 // Main HTTP request function implementation with Named Parameters
 // http_request(url, method, body, headers, timeout_ms, ssl_verify, username, password)
-// Note: FE adds a unique ID for nondeterministic functions (+1), and BE adds a row count (+1).
-// User provides up to 8 parameters, so total columns can be 8, 9, or 10.
-// FE validates argument count, so no validation needed here.
+// FE always passes 8 user parameters (fills defaults for omitted named parameters),
+// plus up to 2 hidden columns (nondeterministic, _is_returning_random_value), so will be 10.
 StatusOr<ColumnPtr> HttpRequestFunctions::http_request(FunctionContext* context, const Columns& columns) {
     RETURN_IF_COLUMNS_ONLY_NULL(columns);
 
