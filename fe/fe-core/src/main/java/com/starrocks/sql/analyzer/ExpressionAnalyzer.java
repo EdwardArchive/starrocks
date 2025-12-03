@@ -973,10 +973,15 @@ public class ExpressionAnalyzer {
                 // Named arguments are used - we need to find the function first, then reorder
                 Function fn = FunctionAnalyzer.getAnalyzedFunctionForNamedArgs(session, node, argumentTypes, exprsNames);
                 if (fn == null) {
+                    // Try to provide a more user-friendly error message
+                    FunctionAnalyzer.throwFriendlyNamedArgError(fnName, argumentTypes, exprsNames);
+                    // Fallback to generic error if no specific error was thrown
                     String msg = String.format("No matching function with signature: %s(%s)",
                             fnName, node.getParams().getNamedArgStr());
                     throw new SemanticException(msg, node.getPos());
                 }
+                // Validate named arguments before reordering
+                FunctionAnalyzer.validateNamedArguments(fnName, fn, exprsNames);
                 // Reorder arguments according to function definition
                 node.getParams().reorderNamedArgAndAppendDefaults(fn);
                 // Update children to match reordered params
@@ -988,6 +993,12 @@ public class ExpressionAnalyzer {
                         visit(child, scope);
                     }
                 }
+                // Validate NULL constraints for http_request function
+                if (FunctionSet.HTTP_REQUEST.equalsIgnoreCase(fnName) && !node.getChildren().isEmpty()
+                        && node.getChild(0) instanceof NullLiteral) {
+                    throw new SemanticException("http_request() required parameter 'url' cannot be NULL",
+                            node.getPos());
+                }
                 node.setFn(fn);
                 node.setType(fn.getReturnType());
                 FunctionAnalyzer.analyze(node);
@@ -997,11 +1008,46 @@ public class ExpressionAnalyzer {
             // get function by function expression and argument types
             Function fn = FunctionAnalyzer.getAnalyzedFunction(session, node, argumentTypes);
             if (fn == null) {
+                // Try to find a function with named arguments that can accept positional arguments
+                fn = FunctionAnalyzer.getAnalyzedFunctionForPositionalCallWithNamedArgs(
+                        session, fnName, argumentTypes);
+                if (fn != null) {
+                    // Append default values for remaining parameters
+                    node.getParams().appendDefaultsForPositionalArgs(fn);
+                    // Update children to match the expanded params
+                    node.clearChildren();
+                    node.addChildren(node.getParams().exprs());
+                    // Re-analyze new children (default values)
+                    for (Expr child : node.getChildren()) {
+                        if (!child.isAnalyzed()) {
+                            visit(child, scope);
+                        }
+                    }
+                    // Validate NULL constraints for http_request function
+                    if (FunctionSet.HTTP_REQUEST.equalsIgnoreCase(fnName) && !node.getChildren().isEmpty()
+                            && node.getChild(0) instanceof NullLiteral) {
+                        throw new SemanticException("http_request() required parameter 'url' cannot be NULL",
+                                node.getPos());
+                    }
+                    node.setFn(fn);
+                    node.setType(fn.getReturnType());
+                    FunctionAnalyzer.analyze(node);
+                    return null;
+                }
+                // Try to provide a more user-friendly error message for positional calls
+                FunctionAnalyzer.throwFriendlyPositionalArgError(fnName, argumentTypes);
+                // Fallback to generic error if no specific error was thrown
                 String msg = String.format("No matching function with signature: %s(%s)",
                         fnName,
                         node.getParams().isStar() ? "*" : Joiner.on(", ")
                                 .join(Arrays.stream(argumentTypes).map(Type::toSql).collect(Collectors.toList())));
                 throw new SemanticException(msg, node.getPos());
+            }
+            // Validate NULL constraints for http_request function
+            if (FunctionSet.HTTP_REQUEST.equalsIgnoreCase(fnName) && !node.getChildren().isEmpty()
+                    && node.getChild(0) instanceof NullLiteral) {
+                throw new SemanticException("http_request() required parameter 'url' cannot be NULL",
+                        node.getPos());
             }
             node.setFn(fn);
             node.setType(fn.getReturnType());
@@ -1357,43 +1403,6 @@ public class ExpressionAnalyzer {
                     if (node.getChildren().size() < 2) {
                         throw new SemanticException("Incorrect parameter count in" +
                                 " the call to native function 'field'");
-                    }
-                    break;
-                }
-                case FunctionSet.HTTP_REQUEST: {
-                    List<String> exprsNames = node.getParams().getExprsNames();
-                    if (exprsNames != null && !exprsNames.isEmpty()) {
-                        // Get valid parameter names from function definition
-                        Function fn = ExprUtils.getBuiltinFunction(FunctionSet.HTTP_REQUEST,
-                                argumentTypes, Function.CompareMode.IS_NONSTRICT_SUPERTYPE_OF);
-                        if (fn == null || !fn.hasNamedArg()) {
-                            throw new SemanticException("http_request() does not support named parameters");
-                        }
-                        Set<String> validParams = Set.of(fn.getArgNames());
-
-                        // Check for duplicate and unknown parameter names
-                        Set<String> seen = new HashSet<>();
-                        for (String paramName : exprsNames) {
-                            if (!seen.add(paramName)) {
-                                throw new SemanticException(String.format(
-                                        "http_request() duplicate parameter '%s'", paramName));
-                            }
-                            if (!validParams.contains(paramName)) {
-                                throw new SemanticException(String.format(
-                                        "http_request() does not support parameter '%s'", paramName));
-                            }
-                        }
-                    } else {
-                        // Positional parameters - get expected count from function definition
-                        Function fn = ExprUtils.getBuiltinFunction(FunctionSet.HTTP_REQUEST,
-                                argumentTypes, Function.CompareMode.IS_NONSTRICT_SUPERTYPE_OF);
-                        int expectedArgs = (fn != null) ? fn.getNumArgs() : 8;
-                        int argCount = node.getChildren().size();
-                        if (argCount != expectedArgs) {
-                            throw new SemanticException(String.format(
-                                    "http_request() expects %d parameters but got %d",
-                                    expectedArgs, argCount));
-                        }
                     }
                     break;
                 }

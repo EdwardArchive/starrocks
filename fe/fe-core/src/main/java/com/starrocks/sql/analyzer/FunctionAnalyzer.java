@@ -36,6 +36,7 @@ import com.starrocks.common.FeConstants;
 import com.starrocks.common.Pair;
 import com.starrocks.qe.ConnectContext;
 import com.starrocks.qe.SessionVariableConstants;
+import com.starrocks.server.GlobalStateMgr;
 import com.starrocks.sql.ast.OrderByElement;
 import com.starrocks.sql.ast.expression.ArrayExpr;
 import com.starrocks.sql.ast.expression.Expr;
@@ -784,7 +785,16 @@ public class FunctionAnalyzer {
         }
 
         // validate argument types
-        for (int i = 0; i < fn.getNumArgs(); i++) {
+        // First check argument count - if mismatched, return null to allow fallback
+        // to named arguments handling in ExpressionAnalyzer
+        if (argumentTypes.length < fn.getNumArgs() && !fn.hasVarArgs()) {
+            // If function supports named args, let ExpressionAnalyzer handle it
+            if (fn.hasNamedArg()) {
+                return null;
+            }
+        }
+        int numArgsToValidate = Math.min(argumentTypes.length, fn.getNumArgs());
+        for (int i = 0; i < numArgsToValidate; i++) {
             if (!argumentTypes[i].matchesType(fn.getArgs()[i]) &&
                     !TypeManager.canCastTo(argumentTypes[i], fn.getArgs()[i])) {
                 String msg = String.format("No matching function with signature: %s(%s)", fnName,
@@ -824,35 +834,181 @@ public class FunctionAnalyzer {
                                                            List<String> exprsNames) {
         String fnName = node.getFnName().getFunction();
         // Find function using named arguments directly
+        // Validation is done separately in validateNamedArguments()
         String[] argNames = exprsNames.toArray(new String[0]);
-        Function fn = ExprUtils.getBuiltinFunction(fnName, argumentTypes, argNames,
+        return ExprUtils.getBuiltinFunction(fnName, argumentTypes, argNames,
                 Function.CompareMode.IS_NONSTRICT_SUPERTYPE_OF);
-        // Validate that the function supports named arguments
-        if (fn != null && !fn.hasNamedArg()) {
+    }
+
+    /**
+     * Validate named arguments for any function that supports them.
+     * Checks for:
+     * - Function supports named arguments
+     * - No duplicate parameter names
+     * - All parameter names are valid
+     * - All required parameters (without defaults) are provided
+     *
+     * @param fnName      function name for error messages
+     * @param fn          the function definition
+     * @param paramNames  list of parameter names provided by user
+     * @throws SemanticException if validation fails
+     */
+    public static void validateNamedArguments(String fnName, Function fn, List<String> paramNames) {
+        if (fn == null || !fn.hasNamedArg()) {
+            throw new SemanticException(fnName + "() does not support named parameters");
+        }
+
+        String[] validParamNames = fn.getArgNames();
+        Set<String> validParams = new HashSet<>(Arrays.asList(validParamNames));
+        Set<String> providedParams = new HashSet<>();
+
+        // Check for duplicates and unknown parameter names
+        for (String paramName : paramNames) {
+            if (!providedParams.add(paramName)) {
+                throw new SemanticException(String.format(
+                        "%s() duplicate parameter '%s'", fnName, paramName));
+            }
+            if (!validParams.contains(paramName)) {
+                // Check for case-insensitive match and provide hint
+                String suggestion = findSimilarParam(paramName, validParamNames);
+                if (suggestion != null) {
+                    throw new SemanticException(String.format(
+                            "%s() unknown parameter '%s'. Did you mean '%s'?", fnName, paramName, suggestion));
+                }
+                throw new SemanticException(String.format(
+                        "%s() does not support parameter '%s'", fnName, paramName));
+            }
+        }
+
+        // Check all required parameters are provided
+        int requiredCount = fn.getRequiredArgNum();
+        for (int i = 0; i < requiredCount; i++) {
+            String requiredParam = validParamNames[i];
+            if (!providedParams.contains(requiredParam)) {
+                throw new SemanticException(String.format(
+                        "%s() required parameter '%s' is missing", fnName, requiredParam));
+            }
+        }
+    }
+
+    /**
+     * Find a similar parameter name (case-insensitive match).
+     */
+    private static String findSimilarParam(String input, String[] validParams) {
+        for (String valid : validParams) {
+            if (valid.equalsIgnoreCase(input)) {
+                return valid;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Throw a user-friendly error when named arguments function lookup fails.
+     * This is called when getAnalyzedFunctionForNamedArgs returns null.
+     */
+    public static void throwFriendlyNamedArgError(String fnName, Type[] argumentTypes, List<String> paramNames) {
+        // Try to find function ignoring argument names to get better error messages
+        Function fn = ExprUtils.getBuiltinFunction(fnName, argumentTypes,
+                Function.CompareMode.IS_NONSTRICT_SUPERTYPE_OF);
+
+        if (fn != null && fn.hasNamedArg()) {
+            // Function exists and supports named args - validate to get specific error
+            validateNamedArguments(fnName, fn, paramNames);
+        }
+        // If we reach here, throw generic error (will be handled by caller)
+    }
+
+    /**
+     * Get function with named arguments support for positional call.
+     * This method is called when regular function lookup fails, to check if
+     * the function supports named arguments and can be called with fewer positional arguments.
+     *
+     * @param session       current connect context
+     * @param fnName        function name
+     * @param argumentTypes argument types provided by the caller
+     * @return function if found and it supports named arguments with defaults, otherwise null
+     */
+    public static Function getAnalyzedFunctionForPositionalCallWithNamedArgs(
+            ConnectContext session, String fnName, Type[] argumentTypes) {
+        // Try to find a function with named arguments by searching with full argument types
+        // We build a "wildcard" search by using the provided types and letting the function
+        // matching handle type compatibility
+        Function fn = ExprUtils.getBuiltinFunction(fnName, argumentTypes,
+                Function.CompareMode.IS_NONSTRICT_SUPERTYPE_OF);
+        if (fn == null || !fn.hasNamedArg()) {
             return null;
         }
-        // Validate named argument names match function definition
-        if (fn != null && !isNamedArgsMatch(fn, exprsNames)) {
+
+        int providedArgCount = argumentTypes.length;
+        int requiredArgCount = fn.getRequiredArgNum();
+        int totalArgCount = fn.getNumArgs();
+
+        // Check if provided arguments count is within valid range
+        if (providedArgCount < requiredArgCount || providedArgCount > totalArgCount) {
             return null;
         }
+
+        // Verify that provided argument types match the function's expected types
+        Type[] fnArgTypes = fn.getArgs();
+        for (int i = 0; i < providedArgCount; i++) {
+            if (!argumentTypes[i].matchesType(fnArgTypes[i]) &&
+                    !TypeManager.canCastTo(argumentTypes[i], fnArgTypes[i])) {
+                return null;
+            }
+        }
+
         return fn;
     }
 
     /**
-     * Check if the named arguments match the function's argument names.
+     * Throw a user-friendly error for positional function calls that failed.
+     * This checks if the function supports named arguments and provides helpful error messages
+     * about missing required parameters.
+     *
+     * @param fnName        function name
+     * @param argumentTypes argument types provided by the caller
      */
-    private static boolean isNamedArgsMatch(Function fn, List<String> exprsNames) {
-        String[] fnArgNames = fn.getArgNames();
-        if (fnArgNames == null) {
-            return false;
+    public static void throwFriendlyPositionalArgError(String fnName, Type[] argumentTypes) {
+        Function fn = null;
+
+        // Try to find a function with named arguments support
+        if (argumentTypes.length > 0) {
+            fn = ExprUtils.getBuiltinFunction(fnName, argumentTypes,
+                    Function.CompareMode.IS_NONSTRICT_SUPERTYPE_OF);
         }
-        Set<String> validNames = new HashSet<>(Arrays.asList(fnArgNames));
-        for (String name : exprsNames) {
-            if (!validNames.contains(name)) {
-                return false;
+
+        // If no arguments provided or function not found, try to find by name from FunctionSet
+        if (fn == null) {
+            List<Function> functions = GlobalStateMgr.getCurrentState().getBuiltinFunctions().stream()
+                    .filter(f -> f.functionName().equalsIgnoreCase(fnName) && f.hasNamedArg())
+                    .collect(Collectors.toList());
+            if (!functions.isEmpty()) {
+                fn = functions.get(0);
             }
         }
-        return true;
+
+        if (fn == null || !fn.hasNamedArg()) {
+            return; // Let caller handle with generic error
+        }
+
+        int providedArgCount = argumentTypes.length;
+        int requiredArgCount = fn.getRequiredArgNum();
+
+        // Check if not enough arguments provided
+        if (providedArgCount < requiredArgCount) {
+            String[] argNames = fn.getArgNames();
+            StringBuilder missingParams = new StringBuilder();
+            for (int i = providedArgCount; i < requiredArgCount; i++) {
+                if (missingParams.length() > 0) {
+                    missingParams.append(", ");
+                }
+                missingParams.append("'").append(argNames[i]).append("'");
+            }
+            throw new SemanticException(String.format(
+                    "%s() requires at least %d argument(s), but got %d. Missing required parameter(s): %s",
+                    fnName, requiredArgCount, providedArgCount, missingParams));
+        }
     }
 
     /**
