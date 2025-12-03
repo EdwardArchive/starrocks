@@ -444,7 +444,19 @@ vectorized_functions = [
     [30470, 'http_request', True, False, 'VARCHAR',
      ['VARCHAR', 'VARCHAR', 'VARCHAR', 'VARCHAR', 'INT', 'BOOLEAN', 'VARCHAR', 'VARCHAR'],
      'HttpRequestFunctions::http_request',
-     'HttpRequestFunctions::http_request_prepare', 'HttpRequestFunctions::http_request_close'],
+     'HttpRequestFunctions::http_request_prepare', 'HttpRequestFunctions::http_request_close',
+     {
+         'named_args': [
+             {'name': 'url'},
+             {'name': 'method', 'default': 'GET'},
+             {'name': 'body', 'default': ''},
+             {'name': 'headers', 'default': '{}'},
+             {'name': 'timeout_ms', 'default': 30000},
+             {'name': 'ssl_verify', 'default': True},
+             {'name': 'username', 'default': ''},
+             {'name': 'password', 'default': ''}
+         ]
+     }],
 
     # Binary Functions
     # to_binary

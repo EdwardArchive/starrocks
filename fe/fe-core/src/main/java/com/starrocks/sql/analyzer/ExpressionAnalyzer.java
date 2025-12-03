@@ -139,6 +139,11 @@ import static com.starrocks.sql.analyzer.AnalyticAnalyzer.verifyAnalyticExpressi
 import static com.starrocks.sql.parser.ErrorMsgProxy.PARSER_ERROR_MSG;
 
 public class ExpressionAnalyzer {
+    // Parameter names must match those defined in functions.py for http_request
+    private static final Set<String> HTTP_REQUEST_VALID_PARAMS = Set.of(
+            "url", "method", "body", "headers",
+            "timeout_ms", "ssl_verify", "username", "password");
+
     private final ConnectContext session;
 
     public ExpressionAnalyzer(ConnectContext session) {
@@ -1357,6 +1362,27 @@ public class ExpressionAnalyzer {
                     if (node.getChildren().size() < 2) {
                         throw new SemanticException("Incorrect parameter count in" +
                                 " the call to native function 'field'");
+                    }
+                    break;
+                }
+                case FunctionSet.HTTP_REQUEST: {
+                    List<String> exprsNames = node.getParams().getExprsNames();
+                    if (exprsNames != null && !exprsNames.isEmpty()) {
+                        // Named parameters - check for unknown parameter names
+                        for (String paramName : exprsNames) {
+                            if (!HTTP_REQUEST_VALID_PARAMS.contains(paramName)) {
+                                throw new SemanticException(String.format(
+                                        "http_request() does not support parameter '%s'", paramName));
+                            }
+                        }
+                    } else {
+                        // Positional parameters - check argument count
+                        int argCount = node.getChildren().size();
+                        if (argCount != 8) {
+                            throw new SemanticException(String.format(
+                                    "http_request() expects 8 parameters but got %d",
+                                    argCount));
+                        }
                     }
                     break;
                 }

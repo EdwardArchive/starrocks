@@ -51,10 +51,6 @@ import com.starrocks.catalog.combinator.StateMergeCombinator;
 import com.starrocks.catalog.combinator.StateUnionCombinator;
 import com.starrocks.sql.analyzer.PolymorphicFunctionAnalyzer;
 import com.starrocks.sql.ast.expression.ArithmeticExpr;
-import com.starrocks.sql.ast.expression.BoolLiteral;
-import com.starrocks.sql.ast.expression.Expr;
-import com.starrocks.sql.ast.expression.IntLiteral;
-import com.starrocks.sql.ast.expression.StringLiteral;
 import com.starrocks.type.AnyArrayType;
 import com.starrocks.type.AnyElementType;
 import com.starrocks.type.AnyMapType;
@@ -81,15 +77,12 @@ import com.starrocks.type.VarbinaryType;
 import com.starrocks.type.VarcharType;
 import com.starrocks.type.VariantType;
 
-import com.starrocks.common.Pair;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.Vector;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -989,48 +982,6 @@ public class FunctionSet {
         VectorizedBuiltinFunctions.initBuiltins(this);
         initAggregateBuiltins();
         addBooleanAggregateFunctions();
-        initHttpRequestNamedParams();
-    }
-
-    /**
-     * Initialize Named Parameter support for http_request function.
-     * This allows users to call http_request with named parameters:
-     *   SELECT http_request(url => 'https://api.example.com', method => 'POST', body => '{}');
-     *
-     * Parameters:
-     *   url (VARCHAR, required) - The URL to request
-     *   method (VARCHAR, default: 'GET') - HTTP method
-     *   body (VARCHAR, default: '') - Request body
-     *   headers (VARCHAR, default: '{}') - JSON object of headers
-     *   timeout_ms (INT, default: 30000) - Request timeout in milliseconds
-     *   ssl_verify (BOOLEAN, default: true) - Whether to verify SSL certificates
-     *   username (VARCHAR, default: '') - Basic auth username
-     *   password (VARCHAR, default: '') - Basic auth password
-     */
-    private void initHttpRequestNamedParams() {
-        List<Function> httpRequestFns = vectorizedFunctions.get(HTTP_REQUEST);
-        if (httpRequestFns != null) {
-            for (Function fn : httpRequestFns) {
-                if (fn.getNumArgs() == 8) {
-                    // Set argument names for Named Parameter support
-                    fn.setArgNames(Lists.newArrayList(
-                            "url", "method", "body", "headers",
-                            "timeout_ms", "ssl_verify", "username", "password"
-                    ));
-
-                    // Set default values for optional parameters (all except url)
-                    Vector<Pair<String, Expr>> defaults = new Vector<>();
-                    defaults.add(new Pair<>("method", new StringLiteral("GET")));
-                    defaults.add(new Pair<>("body", new StringLiteral("")));
-                    defaults.add(new Pair<>("headers", new StringLiteral("{}")));
-                    defaults.add(new Pair<>("timeout_ms", new IntLiteral(30000)));
-                    defaults.add(new Pair<>("ssl_verify", new BoolLiteral(true)));
-                    defaults.add(new Pair<>("username", new StringLiteral("")));
-                    defaults.add(new Pair<>("password", new StringLiteral("")));
-                    fn.setDefaultNamedArgs(defaults);
-                }
-            }
-        }
     }
 
     public static void initAritheticFunctions(FunctionSet functionSet) {
