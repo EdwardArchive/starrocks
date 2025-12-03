@@ -351,7 +351,7 @@ struct TQueryOptions {
 
   200: optional bool enable_full_sort_use_german_string;
 
-  201: optional bool url_ssl_verification_required = false;
+  201: optional bool http_request_ssl_verification_required = false;
 }
 
 // A scan range plus the parameters needed to execute that scan.

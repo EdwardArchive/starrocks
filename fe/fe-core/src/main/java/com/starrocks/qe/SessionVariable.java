@@ -5784,8 +5784,8 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
         tResult.setEnable_hash_join_linear_chained_opt(enableHashJoinLinearChainedOpt);
         tResult.setEnable_hash_join_serialize_fixed_size_string(enableHashJoinSerializeFixedSizeString);
 
-        // URL function SSL verification (admin-enforced setting from Config)
-        tResult.setUrl_ssl_verification_required(Config.url_ssl_verification_required);
+        // http_request function SSL verification (admin-enforced setting from Config)
+        tResult.setHttp_request_ssl_verification_required(Config.http_request_ssl_verification_required);
 
         return tResult;
     }

@@ -367,9 +367,9 @@ public:
                _query_options.enable_full_sort_use_german_string;
     }
 
-    bool url_ssl_verification_required() const {
-        return _query_options.__isset.url_ssl_verification_required &&
-               _query_options.url_ssl_verification_required;
+    bool http_request_ssl_verification_required() const {
+        return _query_options.__isset.http_request_ssl_verification_required &&
+               _query_options.http_request_ssl_verification_required;
     }
 
     int32_t spill_mem_table_size() const {

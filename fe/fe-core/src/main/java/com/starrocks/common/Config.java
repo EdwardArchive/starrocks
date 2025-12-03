@@ -4042,10 +4042,10 @@ public class Config extends ConfigBase {
     @ConfField public static int ui_queries_sql_statement_max_length = 128;
 
     /**
-     * URL function settings
-     * Admin-enforced SSL verification for URL function.
+     * http_request function settings
+     * Admin-enforced SSL verification for http_request function.
      * If true, SSL peer and host verification cannot be disabled via session variables.
      */
-    @ConfField(mutable = true, comment = "Enforce SSL verification for URL function (cannot be disabled by users)")
-    public static boolean url_ssl_verification_required = false;
+    @ConfField(mutable = true, comment = "Enforce SSL verification for http_request function (cannot be disabled by users)")
+    public static boolean http_request_ssl_verification_required = false;
 }

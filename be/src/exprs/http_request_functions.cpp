@@ -293,7 +293,13 @@ static StatusOr<std::string> execute_http_request_with_config(HttpClient& client
     client.set_timeout_ms(config.timeout_ms);
 
     // Apply SSL settings
-    if (!config.ssl_verify && !state->ssl_verify_required) {
+    // If user requests ssl_verify=false but admin enforces SSL verification, return error
+    if (!config.ssl_verify) {
+        if (state->ssl_verify_required) {
+            return build_json_error_response(
+                    "SSL verification is enforced by administrator. "
+                    "Cannot disable SSL verification (ssl_verify: false is not allowed)");
+        }
         client.trust_all_ssl();
     }
 
@@ -349,7 +355,7 @@ Status HttpRequestFunctions::http_request_prepare(FunctionContext* context, Func
     // When admin sets http_request_ssl_verification_required=true, ssl_verify=false in JSON config is ignored
     RuntimeState* runtime_state = context->state();
     if (runtime_state != nullptr) {
-        state->ssl_verify_required = runtime_state->url_ssl_verification_required();
+        state->ssl_verify_required = runtime_state->http_request_ssl_verification_required();
     } else {
         state->ssl_verify_required = false;
     }
