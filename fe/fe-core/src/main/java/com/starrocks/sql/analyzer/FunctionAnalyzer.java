@@ -793,6 +793,9 @@ public class FunctionAnalyzer {
             if (fn.hasNamedArg()) {
                 return null;
             }
+            // For non-varargs, non-named-args functions, argument count must match exactly
+            // Return null to trigger "No matching function" error
+            return null;
         }
         int numArgsToValidate = Math.min(argumentTypes.length, fn.getNumArgs());
         for (int i = 0; i < numArgsToValidate; i++) {
