@@ -42,7 +42,6 @@ import com.starrocks.catalog.Database;
 import com.starrocks.catalog.DistributionInfo;
 import com.starrocks.catalog.FunctionSet;
 import com.starrocks.catalog.HashDistributionInfo;
-import com.starrocks.catalog.KeysType;
 import com.starrocks.catalog.OlapTable;
 import com.starrocks.catalog.Partition;
 import com.starrocks.catalog.PartitionInfo;
@@ -66,12 +65,14 @@ import com.starrocks.sql.analyzer.PartitionDescAnalyzer;
 import com.starrocks.sql.ast.AggregateType;
 import com.starrocks.sql.ast.BrokerDesc;
 import com.starrocks.sql.ast.DataDescription;
+import com.starrocks.sql.ast.KeysType;
 import com.starrocks.sql.ast.PartitionKeyDesc;
-import com.starrocks.sql.ast.PartitionNames;
+import com.starrocks.sql.ast.PartitionRef;
 import com.starrocks.sql.ast.PartitionValue;
 import com.starrocks.sql.ast.SingleRangePartitionDesc;
 import com.starrocks.sql.ast.expression.FunctionCallExpr;
 import com.starrocks.sql.common.MetaUtils;
+import com.starrocks.sql.parser.NodePosition;
 import com.starrocks.type.IntegerType;
 import com.starrocks.type.TypeFactory;
 import mockit.Expectations;
@@ -244,7 +245,7 @@ public class SparkLoadPendingTaskTest {
         // c1 is partition column, c2 is distribution column
         List<Column> columns = Lists.newArrayList();
         columns.add(new Column("c1", IntegerType.INT, true, null, false, null, ""));
-        columns.add(new Column("c2", TypeFactory.createVarchar(10), true, null, false, null, ""));
+        columns.add(new Column("c2", TypeFactory.createVarcharType(10), true, null, false, null, ""));
         columns.add(new Column("c3", IntegerType.INT, false, AggregateType.SUM, false, null, ""));
 
         Map<ColumnId, Column> idToColumn = Maps.newTreeMap(ColumnId.CASE_INSENSITIVE_ORDER);
@@ -390,7 +391,7 @@ public class SparkLoadPendingTaskTest {
         // file group
         aggKeyToFileGroups = Maps.newHashMap();
         brokerFileGroups = Lists.newArrayList();
-        PartitionNames partitionNames = new PartitionNames(true, Lists.newArrayList("tp3"));
+        PartitionRef partitionNames = new PartitionRef(Lists.newArrayList("tp3"), true, NodePosition.ZERO);
         desc = new DataDescription("testTable", partitionNames, Lists.newArrayList("abc.txt"),
                 null, null, null, null, false, null);
         brokerFileGroup = new BrokerFileGroup(desc);

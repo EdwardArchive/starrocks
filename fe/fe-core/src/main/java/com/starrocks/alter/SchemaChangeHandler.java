@@ -50,7 +50,6 @@ import com.starrocks.catalog.ColumnId;
 import com.starrocks.catalog.Database;
 import com.starrocks.catalog.FlatJsonConfig;
 import com.starrocks.catalog.Index;
-import com.starrocks.catalog.KeysType;
 import com.starrocks.catalog.LocalTablet;
 import com.starrocks.catalog.MaterializedIndex;
 import com.starrocks.catalog.MaterializedIndex.IndexExtState;
@@ -115,6 +114,7 @@ import com.starrocks.sql.ast.DropIndexClause;
 import com.starrocks.sql.ast.DropPersistentIndexClause;
 import com.starrocks.sql.ast.IndexDef;
 import com.starrocks.sql.ast.IndexDef.IndexType;
+import com.starrocks.sql.ast.KeysType;
 import com.starrocks.sql.ast.ModifyColumnClause;
 import com.starrocks.sql.ast.ModifyColumnCommentClause;
 import com.starrocks.sql.ast.ModifyTablePropertiesClause;
@@ -2314,10 +2314,7 @@ public class SchemaChangeHandler extends AlterHandler {
 
         boolean metaValue = false;
         if (metaType == TTabletMetaType.INMEMORY) {
-            metaValue = Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_INMEMORY));
-            if (metaValue == olapTable.isInMemory()) {
-                return;
-            }
+            return;
         } else if (metaType == TTabletMetaType.ENABLE_PERSISTENT_INDEX) {
             metaValue = Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_ENABLE_PERSISTENT_INDEX));
             if (metaValue == olapTable.enablePersistentIndex()) {
@@ -2567,46 +2564,6 @@ public class SchemaChangeHandler extends AlterHandler {
 
         }
         return isModifiedSuccess;
-    }
-
-    /**
-     * Update some specified partitions' in-memory property of table
-     */
-    public void updatePartitionsInMemoryMeta(Database db,
-                                             String tableName,
-                                             List<String> partitionNames,
-                                             Map<String, String> properties) throws DdlException {
-        OlapTable olapTable = (OlapTable) GlobalStateMgr.getCurrentState().getLocalMetastore()
-                .getTable(db.getFullName(), tableName);
-        Locker locker = new Locker();
-        locker.lockTablesWithIntensiveDbLock(db.getId(), Lists.newArrayList(olapTable.getId()), LockType.READ);
-        try {
-            for (String partitionName : partitionNames) {
-                Partition partition = olapTable.getPartition(partitionName);
-                if (partition == null) {
-                    throw new DdlException("Partition[" + partitionName + "] does not exist in " +
-                            "table[" + olapTable.getName() + "]");
-                }
-            }
-        } finally {
-            locker.unLockTablesWithIntensiveDbLock(db.getId(), Lists.newArrayList(olapTable.getId()), LockType.READ);
-        }
-
-        boolean isInMemory = Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_INMEMORY));
-        if (isInMemory == olapTable.isInMemory()) {
-            return;
-        }
-
-        for (String partitionName : partitionNames) {
-            try {
-                //updatePartitionInMemoryMeta(db, olapTable.getName(), partitionName, isInMemory);
-                updatePartitionTabletMeta(db, olapTable.getName(), partitionName, isInMemory, TTabletMetaType.INMEMORY);
-            } catch (Exception e) {
-                String errMsg = "Failed to update partition[" + partitionName + "]'s 'in_memory' property. " +
-                        "The reason is [" + e.getMessage() + "]";
-                throw new DdlException(errMsg);
-            }
-        }
     }
 
     /**
@@ -3297,5 +3254,40 @@ public class SchemaChangeHandler extends AlterHandler {
         }
         job.setComputeResource(computeResource);
         return job;
+    }
+
+    /**
+     * Retrieves a historical schema version for the specified table and schema ID.
+     * <p>
+     * Note: This method searches through all jobs to find a matching schema, which is acceptable when the
+     * number of jobs is not excessive. A future optimization could maintain a table ID to alter job mapping 
+     * for improved performance when dealing with many alter jobs.
+     * </p>
+     *
+     * @param dbId the database ID
+     * @param tableId the table ID
+     * @param schemaId the schema ID to retrieve
+     * @return an Optional containing the SchemaInfo if found, or empty if no matching
+     *         historical schema exists
+     */
+    public Optional<SchemaInfo> getHistorySchema(long dbId, long tableId, long schemaId) {
+        for (AlterJobV2 alterJob : alterJobsV2.values()) {
+            if (alterJob.getDbId() != dbId || alterJob.getTableId() != tableId) {
+                continue;
+            }
+            OlapTableHistorySchema historySchema = null;
+            if (alterJob instanceof SchemaChangeJobV2) {
+                historySchema = ((SchemaChangeJobV2) alterJob).getHistorySchema().orElse(null);
+            } else if (alterJob instanceof LakeTableAsyncFastSchemaChangeJob) {
+                historySchema = ((LakeTableAsyncFastSchemaChangeJob) alterJob).getHistorySchema().orElse(null);
+            }
+            if (historySchema != null) {
+                Optional<SchemaInfo> schemaInfo = historySchema.getSchemaBySchemaId(schemaId);
+                if (schemaInfo.isPresent()) {
+                    return schemaInfo;
+                }
+            }
+        }
+        return Optional.empty();
     }
 }

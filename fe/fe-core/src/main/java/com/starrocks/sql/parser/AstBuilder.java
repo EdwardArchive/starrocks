@@ -25,7 +25,7 @@ import com.starrocks.authentication.UserProperty;
 import com.starrocks.catalog.AggregateFunction;
 import com.starrocks.catalog.Function;
 import com.starrocks.catalog.FunctionSet;
-import com.starrocks.catalog.KeysType;
+import com.starrocks.catalog.PartitionNames;
 import com.starrocks.catalog.TableName;
 import com.starrocks.catalog.combinator.AggStateUtils;
 import com.starrocks.common.AnalysisException;
@@ -234,6 +234,7 @@ import com.starrocks.sql.ast.JoinOperator;
 import com.starrocks.sql.ast.JoinRelation;
 import com.starrocks.sql.ast.KeyPartitionRef;
 import com.starrocks.sql.ast.KeysDesc;
+import com.starrocks.sql.ast.KeysType;
 import com.starrocks.sql.ast.KillAnalyzeStmt;
 import com.starrocks.sql.ast.KillStmt;
 import com.starrocks.sql.ast.LabelName;
@@ -259,7 +260,6 @@ import com.starrocks.sql.ast.OutFileClause;
 import com.starrocks.sql.ast.ParseNode;
 import com.starrocks.sql.ast.PartitionDesc;
 import com.starrocks.sql.ast.PartitionKeyDesc;
-import com.starrocks.sql.ast.PartitionNames;
 import com.starrocks.sql.ast.PartitionRangeDesc;
 import com.starrocks.sql.ast.PartitionRef;
 import com.starrocks.sql.ast.PartitionRenameClause;
@@ -535,30 +535,9 @@ import com.starrocks.transaction.GtidGenerator;
 import com.starrocks.type.AggStateDesc;
 import com.starrocks.type.AnyMapType;
 import com.starrocks.type.ArrayType;
-import com.starrocks.type.BitmapType;
-import com.starrocks.type.BooleanType;
-import com.starrocks.type.CharType;
 import com.starrocks.type.DateType;
-import com.starrocks.type.DecimalType;
-import com.starrocks.type.FloatType;
-import com.starrocks.type.FunctionType;
-import com.starrocks.type.HLLType;
 import com.starrocks.type.IntegerType;
-import com.starrocks.type.JsonType;
-import com.starrocks.type.MapType;
-import com.starrocks.type.NullType;
-import com.starrocks.type.PercentileType;
-import com.starrocks.type.PrimitiveType;
-import com.starrocks.type.ScalarType;
-import com.starrocks.type.StringType;
-import com.starrocks.type.StructField;
-import com.starrocks.type.StructType;
 import com.starrocks.type.Type;
-import com.starrocks.type.TypeFactory;
-import com.starrocks.type.UnknownType;
-import com.starrocks.type.VarbinaryType;
-import com.starrocks.type.VarcharType;
-import com.starrocks.type.VariantType;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.RuleContext;
 import org.antlr.v4.runtime.Token;
@@ -596,6 +575,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static com.starrocks.catalog.FunctionSet.ARRAY_AGG_DISTINCT;
+import static com.starrocks.sql.parser.AstBuilderUtils.createPos;
 import static com.starrocks.sql.parser.ErrorMsgProxy.PARSER_ERROR_MSG;
 import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
@@ -846,7 +826,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         PartitionRef partitionRef = null;
         if (context.partitionNames() != null) {
             stop = context.partitionNames().stop;
-            PartitionNames partitionNames = (PartitionNames) visit(context.partitionNames());
+            PartitionRef partitionNames = (PartitionRef) visit(context.partitionNames());
             partitionRef = new PartitionRef(partitionNames.getPartitionNames(), partitionNames.isTemp(), partitionNames.getPos());
         }
 
@@ -1142,7 +1122,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
                 columnType = typeWithAggStateDesc.first;
             }
         } else {
-            columnType = getType(context.type());
+            columnType = TypeParser.getType(context.type());
         }
 
         // get column's agg state desc
@@ -1390,7 +1370,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         PartitionRef partitionRef = null;
         if (context.partitionNames() != null) {
             stop = context.partitionNames().stop;
-            PartitionNames partitionNames = (PartitionNames) visit(context.partitionNames());
+            PartitionRef partitionNames = (PartitionRef) visit(context.partitionNames());
             if (partitionNames.isKeyPartitionNames()) {
                 KeyPartitionRef keyPartitionRef = new KeyPartitionRef(partitionNames.getPartitionColNames(),
                         partitionNames.getPartitionColValues(), createPos(context.partitionNames()));
@@ -1908,9 +1888,9 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         } else {
             QualifiedName qualifiedName = getQualifiedName(context.qualifiedName());
             TableName dbTblName = qualifiedNameToTableName(qualifiedName);
-            PartitionNames partitionNames = null;
+            PartitionRef partitionNames = null;
             if (context.partitionNames() != null) {
-                partitionNames = (PartitionNames) visit(context.partitionNames());
+                partitionNames = (PartitionRef) visit(context.partitionNames());
             }
             Expr where = null;
             if (context.expression() != null) {
@@ -2444,9 +2424,9 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         if (context.qualifiedName() != null) {
             QualifiedName qualifiedName = getQualifiedName(context.qualifiedName());
             TableName targetTableName = qualifiedNameToTableName(qualifiedName);
-            PartitionNames partitionNames = null;
+            PartitionRef partitionNames = null;
             if (context.partitionNames() != null) {
-                partitionNames = (PartitionNames) visit(context.partitionNames());
+                partitionNames = (PartitionRef) visit(context.partitionNames());
             }
 
             String targetBranch = null;
@@ -2550,9 +2530,9 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         }
         QualifiedName qualifiedName = getQualifiedName(context.qualifiedName());
         TableName targetTableName = qualifiedNameToTableName(qualifiedName);
-        PartitionNames partitionNames = null;
+        PartitionRef partitionNames = null;
         if (context.partitionNames() != null) {
-            partitionNames = (PartitionNames) visit(context.partitionNames());
+            partitionNames = (PartitionRef) visit(context.partitionNames());
         }
         List<Relation> usingRelations = context.using != null ? visit(context.using.relation(), Relation.class) : null;
         Expr where = context.where != null ? (Expr) visit(context.where) : null;
@@ -2743,7 +2723,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         PartitionRef partitionRef = null;
         if (context.partitionNames() != null) {
             stop = context.partitionNames().stop;
-            PartitionNames partitionNames = (PartitionNames) visit(context.partitionNames());
+            PartitionRef partitionNames = (PartitionRef) visit(context.partitionNames());
             partitionRef = new PartitionRef(partitionNames.getPartitionNames(), partitionNames.isTemp(), partitionNames.getPos());
         }
 
@@ -2762,7 +2742,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         PartitionRef partitionRef = null;
         if (context.partitionNames() != null) {
             stop = context.partitionNames().stop;
-            PartitionNames partitionNames = (PartitionNames) visit(context.partitionNames());
+            PartitionRef partitionNames = (PartitionRef) visit(context.partitionNames());
             partitionRef = new PartitionRef(partitionNames.getPartitionNames(), partitionNames.isTemp(), partitionNames.getPos());
         }
 
@@ -2780,7 +2760,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         PartitionRef partitionRef = null;
         if (context.partitionNames() != null) {
             stop = context.partitionNames().stop;
-            PartitionNames partitionNames = (PartitionNames) visit(context.partitionNames());
+            PartitionRef partitionNames = (PartitionRef) visit(context.partitionNames());
             partitionRef = new PartitionRef(partitionNames.getPartitionNames(), partitionNames.isTemp(), partitionNames.getPos());
         }
 
@@ -2800,7 +2780,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         PartitionRef partitionRef = null;
         if (context.partitionNames() != null) {
             stop = context.partitionNames().stop;
-            PartitionNames partitionNames = (PartitionNames) visit(context.partitionNames());
+            PartitionRef partitionNames = (PartitionRef) visit(context.partitionNames());
             partitionRef = new PartitionRef(partitionNames.getPartitionNames(), partitionNames.isTemp(), partitionNames.getPos());
         }
 
@@ -2948,9 +2928,9 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
 
     @Override
     public ParseNode visitAnalyzeStatement(com.starrocks.sql.parser.StarRocksParser.AnalyzeStatementContext context) {
-        PartitionNames partitionNames = null;
+        PartitionRef partitionNames = null;
         if (context.partitionNames() != null) {
-            partitionNames = (PartitionNames) visit(context.partitionNames());
+            partitionNames = (PartitionRef) visit(context.partitionNames());
         }
 
         TableName tableName = qualifiedNameToTableName(getQualifiedName(context.tableName().qualifiedName()));
@@ -3292,7 +3272,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
     private DataDescription getDataDescription(com.starrocks.sql.parser.StarRocksParser.DataDescContext context) {
         NodePosition pos = createPos(context);
         String dstTableName = normalizeName(((Identifier) visit(context.dstTableName)).getValue());
-        PartitionNames partitionNames = (PartitionNames) visitIfPresent(context.partitions);
+        PartitionRef partitionNames = (PartitionRef) visitIfPresent(context.partitions);
         Expr whereExpr = (Expr) visitIfPresent(context.where);
         List<Expr> colMappingList = null;
         if (context.colMappingList != null) {
@@ -3744,7 +3724,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         QualifiedName qualifiedName = getQualifiedName(qualifiedNameContext);
         PartitionRef partitionRef = null;
         if (partitionNamesContext != null) {
-            PartitionNames partitionNames = (PartitionNames) visit(partitionNamesContext);
+            PartitionRef partitionNames = (PartitionRef) visit(partitionNamesContext);
             partitionRef = new PartitionRef(partitionNames.getPartitionNames(), partitionNames.isTemp(),
                     partitionNames.getPos());
         }
@@ -4200,10 +4180,14 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         Token stop = qualifiedNameContext.stop;
         QualifiedName qualifiedName = getQualifiedName(qualifiedNameContext);
         TableName tableName = qualifiedNameToTableName(qualifiedName);
-        PartitionNames partitionNames = null;
+        PartitionRef partitionRef = null;
         if (context.tableDesc().partitionNames() != null) {
             stop = context.tableDesc().partitionNames().stop;
-            partitionNames = (PartitionNames) visit(context.tableDesc().partitionNames());
+            partitionRef = (PartitionRef) visit(context.tableDesc().partitionNames());
+        }
+        PartitionNames partitionNames = null;
+        if (partitionRef != null) {
+            partitionNames = new PartitionNames(partitionRef.isTemp(), partitionRef.getPartitionNames(), partitionRef.getPos());
         }
         TableRefPersist tableRef = new TableRefPersist(tableName, null, partitionNames, createPos(start, stop));
 
@@ -4906,7 +4890,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
                 context.partitionDesc() == null ? null : getPartitionDesc(context.partitionDesc(), null),
                 context.distributionDesc() == null ? null : (DistributionDesc) visit(context.distributionDesc()),
                 context.orderByDesc() == null ? null : visit(context.orderByDesc().sortItem(), OrderByElement.class),
-                context.partitionNames() == null ? null : (PartitionNames) visit(context.partitionNames()),
+                context.partitionNames() == null ? null : (PartitionRef) visit(context.partitionNames()),
                 context.optimizeRange() == null ? null : (OptimizeRange) visit(context.optimizeRange()),
                 createPos(context));
     }
@@ -5042,7 +5026,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         }
         String fieldName = parts.get(parts.size() - 1);
         parts.remove(parts.size() - 1);
-        TypeDef typeDef = new TypeDef(getType(subFieldDescContext.type()), createPos(subFieldDescContext.type()));
+        TypeDef typeDef = new TypeDef(TypeParser.getType(subFieldDescContext.type()), createPos(subFieldDescContext.type()));
         ColumnPosition fieldPosition = null;
         if (context.FIRST() != null) {
             fieldPosition = ColumnPosition.FIRST;
@@ -5161,7 +5145,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
     @Override
     public ParseNode visitSplitTabletClause(com.starrocks.sql.parser.StarRocksParser.SplitTabletClauseContext context) {
         return new SplitTabletClause(
-                context.partitionNames() == null ? null : (PartitionNames) visit(context.partitionNames()),
+                context.partitionNames() == null ? null : (PartitionRef) visit(context.partitionNames()),
                 context.tabletList() == null ? null : (TabletList) visit(context.tabletList()),
                 getCaseSensitiveProperties(context.properties()),
                 createPos(context));
@@ -5230,9 +5214,9 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
     @Override
     public ParseNode visitTruncatePartitionClause(
             com.starrocks.sql.parser.StarRocksParser.TruncatePartitionClauseContext context) {
-        PartitionNames partitionNames = null;
+        PartitionRef partitionNames = null;
         if (context.partitionNames() != null) {
-            partitionNames = (PartitionNames) visit(context.partitionNames());
+            partitionNames = (PartitionRef) visit(context.partitionNames());
         }
         return new TruncatePartitionClause(partitionNames, createPos(context));
     }
@@ -5257,10 +5241,10 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
 
     @Override
     public ParseNode visitReplacePartitionClause(com.starrocks.sql.parser.StarRocksParser.ReplacePartitionClauseContext context) {
-        PartitionNames partitionNames = (PartitionNames) visit(context.parName);
-        PartitionNames newPartitionNames = (PartitionNames) visit(context.tempParName);
+        PartitionRef partitionNames = (PartitionRef) visit(context.parName);
+        PartitionRef newPartitionRef = (PartitionRef) visit(context.tempParName);
 
-        return new ReplacePartitionClause(partitionNames, newPartitionNames,
+        return new ReplacePartitionClause(partitionNames, newPartitionRef,
                 getCaseSensitiveProperties(context.properties()), createPos(context));
     }
 
@@ -5988,6 +5972,17 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
 
     @Override
     public ParseNode visitSortItem(com.starrocks.sql.parser.StarRocksParser.SortItemContext context) {
+        // Handle ORDER BY ALL
+        if (context.ALL() != null) {
+            return new OrderByElement(
+                    new IntLiteral(0), // Placeholder expression for ORDER BY ALL
+                    getOrderingType(context.ordering),
+                    getNullOrderingType(getOrderingType(context.ordering), context.nullOrdering),
+                    createPos(context),
+                    true); // isOrderByAll = true
+        }
+
+        // Handle regular ORDER BY expression
         return new OrderByElement(
                 (Expr) visit(context.expression()),
                 getOrderingType(context.ordering),
@@ -6073,10 +6068,10 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         Token stop = context.stop;
         QualifiedName qualifiedName = getQualifiedName(context.qualifiedName());
         TableName tableName = qualifiedNameToTableName(qualifiedName);
-        PartitionNames partitionNames = null;
+        PartitionRef partitionNames = null;
         if (context.partitionNames() != null) {
             stop = context.partitionNames().stop;
-            partitionNames = (PartitionNames) visit(context.partitionNames());
+            partitionNames = (PartitionRef) visit(context.partitionNames());
         }
 
         List<Long> tabletIds = Lists.newArrayList();
@@ -6353,9 +6348,8 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         }
 
         List<Identifier> identifierList = visit(context.identifierOrString(), Identifier.class);
-        return new PartitionNames(context.TEMPORARY() != null,
-                identifierList.stream().map(Identifier::getValue).collect(toList()),
-                createPos(context));
+        return new PartitionRef(identifierList.stream().map(Identifier::getValue).collect(toList()),
+                context.TEMPORARY() != null, createPos(context));
     }
 
     @Override
@@ -6375,7 +6369,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
             partitionColValues.add(partitionValue);
         }
 
-        return new PartitionNames(false, new ArrayList<>(), partitionColNames, partitionColValues, NodePosition.ZERO);
+        return new PartitionRef(new ArrayList<>(), false, partitionColNames, partitionColValues, NodePosition.ZERO);
     }
 
     @Override
@@ -6504,7 +6498,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         QualifiedName qualifiedName = getQualifiedName(context.qualifiedName());
         String functionName = qualifiedName.toString();
 
-        TypeDef returnTypeDef = new TypeDef(getType(context.returnType), createPos(context.returnType));
+        TypeDef returnTypeDef = new TypeDef(TypeParser.getType(context.returnType), createPos(context.returnType));
 
         Map<String, String> properties = context.properties() == null ? null : getCaseSensitiveProperties(context.properties());
         if (context.inlineProperties() != null) {
@@ -7994,13 +7988,13 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
 
     @Override
     public ParseNode visitCast(com.starrocks.sql.parser.StarRocksParser.CastContext context) {
-        return new CastExpr(new TypeDef(getType(context.type())), (Expr) visit(context.expression()),
+        return new CastExpr(new TypeDef(TypeParser.getType(context.type())), (Expr) visit(context.expression()),
                 createPos(context));
     }
 
     @Override
     public ParseNode visitConvert(com.starrocks.sql.parser.StarRocksParser.ConvertContext context) {
-        return new CastExpr(new TypeDef(getType(context.type())), (Expr) visit(context.expression()),
+        return new CastExpr(new TypeDef(TypeParser.getType(context.type())), (Expr) visit(context.expression()),
                 createPos(context));
     }
 
@@ -8248,7 +8242,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         NodePosition pos = createPos(context);
         Type type = null;
         if (context.arrayType() != null) {
-            type = new ArrayType(getType(context.arrayType().type()));
+            type = new ArrayType(TypeParser.getType(context.arrayType().type()));
         }
 
         List<Expr> exprs;
@@ -8275,7 +8269,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         NodePosition pos = createPos(context);
         Type type = AnyMapType.ANY_MAP;
         if (context.mapType() != null) {
-            type = getMapType(context.mapType());
+            type = TypeParser.getMapType(context.mapType());
         }
         List<Expr> exprs;
         if (context.mapExpressionList() != null) {
@@ -8573,7 +8567,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
 
     private static StatementBase.ExplainLevel getExplainType(
             com.starrocks.sql.parser.StarRocksParser.ExplainDescContext context) {
-        StatementBase.ExplainLevel explainLevel = StatementBase.ExplainLevel.parse(Config.query_detail_explain_level);
+        StatementBase.ExplainLevel explainLevel = StatementBase.ExplainLevel.parse(Config.query_explain_level);
         if (context.LOGICAL() != null) {
             explainLevel = StatementBase.ExplainLevel.LOGICAL;
         } else if (context.ANALYZE() != null) {
@@ -9128,7 +9122,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
     private FunctionArgsDef getFunctionArgsDef(com.starrocks.sql.parser.StarRocksParser.TypeListContext typeList) {
         List<TypeDef> typeDefList = new ArrayList<>();
         for (com.starrocks.sql.parser.StarRocksParser.TypeContext typeContext : typeList.type()) {
-            typeDefList.add(new TypeDef(getType(typeContext)));
+            typeDefList.add(new TypeDef(TypeParser.getType(typeContext)));
         }
         boolean isVariadic = typeList.DOTDOTDOT() != null;
         return new FunctionArgsDef(typeDefList, isVariadic);
@@ -9210,20 +9204,6 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         }
     }
 
-    public Type getType(com.starrocks.sql.parser.StarRocksParser.TypeContext context) {
-        if (context.baseType() != null) {
-            return getBaseType(context.baseType());
-        } else if (context.decimalType() != null) {
-            return getDecimalType(context.decimalType());
-        } else if (context.arrayType() != null) {
-            return getArrayType(context.arrayType());
-        } else if (context.structType() != null) {
-            return getStructType(context.structType());
-        } else {
-            return getMapType(context.mapType());
-        }
-    }
-
     /**
      * Whether the input decimal is wildcard which is no precision or scale.
      */
@@ -9264,7 +9244,7 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
                 aggStateDescContext.typeWithNullable();
         List<Type> argTypes = Lists.newArrayList();
         for (com.starrocks.sql.parser.StarRocksParser.TypeWithNullableContext typeWithNullableContext : typeWithNullables) {
-            Type argType = getType(typeWithNullableContext.type());
+            Type argType = TypeParser.getType(typeWithNullableContext.type());
             if (isWildcardDecimalType(typeWithNullableContext.type())) {
                 throw new ParsingException(String.format("AggStateType function %s with input %s has wildcard decimal",
                         aggFuncName, argType), createPos(context));
@@ -9302,198 +9282,6 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
                 argTypes.stream().map(c -> c.clone()).collect(toList()), 
                 AggStateDesc.isAggFuncResultNullable(aggFunc.functionName()));
         return Pair.create(finalType.clone(), aggStateDesc);
-    }
-
-    private Type getBaseType(com.starrocks.sql.parser.StarRocksParser.BaseTypeContext context) {
-        int length = -1;
-        if (context.typeParameter() != null) {
-            length = Integer.parseInt(context.typeParameter().INTEGER_VALUE().toString());
-        }
-        if (context.STRING() != null || context.TEXT() != null) {
-            ScalarType type = TypeFactory.createVarcharType(StringType.DEFAULT_STRING_LENGTH);
-            return type;
-        } else if (context.VARCHAR() != null) {
-            ScalarType type = TypeFactory.createVarcharType(length);
-            return type;
-        } else if (context.CHAR() != null) {
-            ScalarType type = TypeFactory.createCharType(length);
-            return type;
-        } else if (context.SIGNED() != null) {
-            return IntegerType.INT;
-        } else if (context.HLL() != null) {
-            ScalarType type = TypeFactory.createHllType();
-            return type;
-        } else if (context.BINARY() != null || context.VARBINARY() != null) {
-            ScalarType type = TypeFactory.createVarbinary(length);
-            return type;
-        } else {
-            String typeStr = context.getChild(0).getText();
-            ScalarType res = getTypeByName(typeStr);
-            return res;
-        }
-    }
-
-    private ScalarType getTypeByName(String typeName) {
-        if (typeName == null) {
-            return null;
-        }
-
-        String upperTypeName = typeName.toUpperCase();
-        switch (upperTypeName) {
-            // Null type
-            case "NULL_TYPE":
-                return NullType.NULL;
-
-            // Boolean type
-            case "BOOLEAN":
-                return BooleanType.BOOLEAN;
-
-            // Integer types
-            case "TINYINT":
-                return IntegerType.TINYINT;
-            case "SMALLINT":
-                return IntegerType.SMALLINT;
-            case "INTEGER":
-            case "UNSIGNED":
-            case "INT":
-                return IntegerType.INT;
-            case "BIGINT":
-                return IntegerType.BIGINT;
-            case "LARGEINT":
-                return IntegerType.LARGEINT;
-
-            // Float types
-            case "FLOAT":
-                return FloatType.FLOAT;
-            case "DOUBLE":
-                return FloatType.DOUBLE;
-
-            // Decimal types
-            case "DECIMAL":
-            case "DECIMALV2":
-                return DecimalType.DEFAULT_DECIMALV2;
-            case "DECIMAL32":
-                return DecimalType.DECIMAL32;
-            case "DECIMAL64":
-                return DecimalType.DECIMAL64;
-            case "DECIMAL128":
-                return DecimalType.DECIMAL128;
-            case "DECIMAL256":
-                return DecimalType.DECIMAL256;
-
-            // String types
-            case "STRING":
-                return StringType.DEFAULT_STRING;
-            case "CHAR":
-                return CharType.CHAR;
-            case "VARCHAR":
-                return VarcharType.VARCHAR;
-
-            // Date/Time types
-            case "DATE":
-                return DateType.DATE;
-            case "DATETIME":
-                return DateType.DATETIME;
-            case "TIME":
-                return DateType.TIME;
-
-            // Binary types
-            case "VARBINARY":
-                return VarbinaryType.VARBINARY;
-
-            // Special types
-            case "HLL":
-                return HLLType.HLL;
-            case "BITMAP":
-                return BitmapType.BITMAP;
-            case "PERCENTILE":
-                return PercentileType.PERCENTILE;
-            case "JSON":
-                return JsonType.JSON;
-            case "VARIANT":
-                return VariantType.VARIANT;
-            case "FUNCTION":
-                return FunctionType.FUNCTION;
-            case "UNKNOWN_TYPE":
-                return UnknownType.UNKNOWN_TYPE;
-
-            default:
-                return null;
-        }
-    }
-
-    public ScalarType getDecimalType(com.starrocks.sql.parser.StarRocksParser.DecimalTypeContext context) {
-        Integer precision = null;
-        Integer scale = null;
-        if (context.precision != null) {
-            precision = Integer.parseInt(context.precision.getText());
-            if (context.scale != null) {
-                scale = Integer.parseInt(context.scale.getText());
-            }
-        }
-        if (context.DECIMAL() != null || context.NUMBER() != null || context.NUMERIC() != null) {
-            if (precision != null) {
-                if (scale != null) {
-                    return TypeFactory.createUnifiedDecimalType(precision, scale);
-                }
-                return TypeFactory.createUnifiedDecimalType(precision);
-            }
-            return TypeFactory.createUnifiedDecimalType(10, 0);
-        } else if (context.DECIMAL32() != null || context.DECIMAL64() != null ||
-                context.DECIMAL128() != null || context.DECIMAL256() != null) {
-            if (!Config.enable_decimal_v3) {
-                throw new SemanticException("Config field enable_decimal_v3 is false now, " +
-                        "turn it on before decimal32/64/128/256 are used, " +
-                        "execute cmd 'admin set frontend config (\"enable_decimal_v3\" = \"true\")' " +
-                        "on every FE server");
-            }
-            final PrimitiveType primitiveType = PrimitiveType.valueOf(context.children.get(0).getText().toUpperCase());
-            if (precision != null) {
-                if (scale != null) {
-                    return TypeFactory.createDecimalV3Type(primitiveType, precision, scale);
-                }
-                return TypeFactory.createDecimalV3Type(primitiveType, precision);
-            }
-            return TypeFactory.createDecimalV3Type(primitiveType);
-        } else if (context.DECIMALV2() != null) {
-            if (precision != null) {
-                if (scale != null) {
-                    return TypeFactory.createDecimalV2Type(precision, scale);
-                }
-                return TypeFactory.createDecimalV2Type(precision);
-            }
-            return DecimalType.DEFAULT_DECIMALV2;
-        } else {
-            throw new IllegalArgumentException("Unsupported type " + context.getText());
-        }
-    }
-
-    public ArrayType getArrayType(com.starrocks.sql.parser.StarRocksParser.ArrayTypeContext context) {
-        return new ArrayType(getType(context.type()));
-    }
-
-    public StructType getStructType(com.starrocks.sql.parser.StarRocksParser.StructTypeContext context) {
-        ArrayList<StructField> fields = new ArrayList<>();
-        List<com.starrocks.sql.parser.StarRocksParser.SubfieldDescContext> subfields =
-                context.subfieldDescs().subfieldDesc();
-        for (com.starrocks.sql.parser.StarRocksParser.SubfieldDescContext type : subfields) {
-            Identifier fieldIdentifier = (Identifier) visit(type.identifier());
-            String fieldName = fieldIdentifier.getValue();
-            fields.add(new StructField(fieldName, getType(type.type()), null));
-        }
-
-        return new StructType(fields);
-    }
-
-    public MapType getMapType(com.starrocks.sql.parser.StarRocksParser.MapTypeContext context) {
-        Type keyType = getType(context.type(0));
-        if (!keyType.isValidMapKeyType()) {
-            throw new ParsingException(PARSER_ERROR_MSG.unsupportedType(keyType.toString(),
-                    "for map's key, which should be base types"),
-                    createPos(context.type(0)));
-        }
-        Type valueType = getType(context.type(1));
-        return new MapType(keyType, valueType);
     }
 
     private LabelName qualifiedNameToLabelName(QualifiedName qualifiedName) {
@@ -9639,23 +9427,6 @@ public class AstBuilder extends com.starrocks.sql.parser.StarRocksBaseVisitor<Pa
         } else {
             return null;
         }
-    }
-
-    protected NodePosition createPos(ParserRuleContext context) {
-        Preconditions.checkState(context != null);
-        return createPos(context.start, context.stop);
-    }
-
-    private NodePosition createPos(Token start, Token stop) {
-        if (start == null) {
-            return NodePosition.ZERO;
-        }
-
-        if (stop == null) {
-            return new NodePosition(start.getLine(), start.getCharPositionInLine());
-        }
-
-        return new NodePosition(start, stop);
     }
 
     // labelName can be null or (db.)name format

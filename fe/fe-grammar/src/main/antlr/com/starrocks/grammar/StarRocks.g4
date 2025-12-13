@@ -2353,6 +2353,7 @@ rowConstructor
 
 sortItem
     : expression ordering = (ASC | DESC)? (NULLS nullOrdering=(FIRST | LAST))?
+    | ALL ordering = (ASC | DESC)? (NULLS nullOrdering=(FIRST | LAST))?
     ;
 
 limitConstExpr
@@ -2733,6 +2734,7 @@ informationFunctionExpression
     | name = CURRENT_USER ('(' ')')?
     | name = CURRENT_ROLE ('(' ')')?
     | name = CURRENT_GROUP ('(' ')')?
+    | name = CURRENT_WAREHOUSE ('(' ')')?
     ;
 
 specialDateTimeExpression

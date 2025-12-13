@@ -24,7 +24,6 @@ import com.starrocks.catalog.ColumnAccessPath;
 import com.starrocks.catalog.Function;
 import com.starrocks.catalog.FunctionSet;
 import com.starrocks.catalog.JDBCTable;
-import com.starrocks.catalog.KeysType;
 import com.starrocks.catalog.MaterializedIndex;
 import com.starrocks.catalog.MaterializedIndexMeta;
 import com.starrocks.catalog.MaterializedView;
@@ -115,7 +114,6 @@ import com.starrocks.qe.ConnectContext;
 import com.starrocks.qe.SessionVariable;
 import com.starrocks.server.GlobalStateMgr;
 import com.starrocks.server.LocalMetastore;
-import com.starrocks.server.RunMode;
 import com.starrocks.server.WarehouseManager;
 import com.starrocks.service.FrontendOptions;
 import com.starrocks.sql.analyzer.AnalyzerUtils;
@@ -125,6 +123,7 @@ import com.starrocks.sql.ast.AssertNumRowsElement;
 import com.starrocks.sql.ast.BrokerDesc;
 import com.starrocks.sql.ast.CreateMaterializedViewStatement;
 import com.starrocks.sql.ast.JoinOperator;
+import com.starrocks.sql.ast.KeysType;
 import com.starrocks.sql.ast.OrderByElement;
 import com.starrocks.sql.ast.QueryRelation;
 import com.starrocks.sql.ast.expression.BinaryType;
@@ -355,12 +354,12 @@ public class PlanFragmentBuilder {
         // We shouldn't set result sink directly to top fragment, because we will hash multi result sink.
         // Note: If enable compute node and the top fragment not GATHER node, the parallelism of top fragment can't
         // be 1, it's error
-        if ((!enableComputeNode(execPlan)
-                && !inputFragment.hashLocalBucketShuffleRightOrFullJoin(inputFragment.getPlanRoot())
+        if ((!inputFragment.hashLocalBucketShuffleRightOrFullJoin(inputFragment.getPlanRoot())
                 && execPlan.getScanNodes().stream().allMatch(d -> d instanceof OlapScanNode)
                 && (execPlan.getScanNodes().stream().map(d -> ((OlapScanNode) d).getScanTabletIds().size())
                 .reduce(Integer::sum).orElse(2) <= 1)) || execPlan.isShortCircuit()) {
             inputFragment.setOutputExprs(outputExprs);
+            inputFragment.setSingleTabletGatherOutputFragment(true);
             return;
         }
 
@@ -373,14 +372,6 @@ public class PlanFragmentBuilder {
 
         exchangeFragment.setOutputExprs(outputExprs);
         execPlan.getFragments().add(exchangeFragment);
-    }
-
-    private static boolean enableComputeNode(ExecPlan execPlan) {
-        boolean preferComputeNode = execPlan.getConnectContext().getSessionVariable().isPreferComputeNode();
-        if (preferComputeNode || RunMode.isSharedDataMode()) {
-            return true;
-        }
-        return false;
     }
 
     private static boolean useQueryCache(ExecPlan execPlan) {
@@ -404,6 +395,7 @@ public class PlanFragmentBuilder {
             List<ExecGroup> colocateExecGroups =
                     execPlan.getExecGroups().stream().filter(ExecGroup::isColocateExecGroup).collect(
                             Collectors.toList());
+            final List<ExecGroup> execGroups = execPlan.getExecGroups();
             for (PlanFragment fragment : fragments) {
                 fragment.assignColocateExecGroups(fragment.getPlanRoot(), colocateExecGroups);
             }
@@ -935,7 +927,7 @@ public class PlanFragmentBuilder {
             tupleDescriptor.setTable(referenceTable);
 
             OlapScanNode scanNode = new OlapScanNode(context.getNextNodeId(), tupleDescriptor, "OlapScanNode",
-                    context.getConnectContext().getCurrentComputeResource());
+                    node.getSelectedIndexId(), context.getConnectContext().getCurrentComputeResource());
             scanNode.setLimit(node.getLimit());
             scanNode.computeStatistics(optExpr.getStatistics());
             scanNode.setScanOptimizeOption(node.getScanOptimizeOption());
@@ -950,8 +942,7 @@ public class PlanFragmentBuilder {
             try {
                 scanNode.updateScanInfo(node.getSelectedPartitionId(),
                         node.getSelectedTabletId(),
-                        node.getHintsReplicaId(),
-                        node.getSelectedIndexId());
+                        node.getHintsReplicaId());
                 long selectedIndexId = node.getSelectedIndexId();
                 long totalTabletsNum = 0;
                 // Compatible with old tablet selected, copy from "OlapScanNode::computeTabletInfo"
@@ -3034,8 +3025,8 @@ public class PlanFragmentBuilder {
                     // do nothing
                 } else {
                     // we don't support group execution for other join
-                    currentExecGroup.disableColocateGroup(leftFragmentPlanRoot);
-                    rightExecGroup.disableColocateGroup(rightFragmentPlanRoot);
+                    currentExecGroup.setDisableColocateGroupForAllChildren(leftFragmentPlanRoot, execGroups);
+                    rightExecGroup.setDisableColocateGroupForAllChildren(rightFragmentPlanRoot, execGroups);
                     currentExecGroup.merge(rightExecGroup);
                     execGroups.remove(rightExecGroup);
                 }

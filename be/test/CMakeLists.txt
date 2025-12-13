@@ -5,6 +5,7 @@ set(EXEC_FILES
         ./agent/resource_group_usage_recorder_test.cpp
         ./column/array_column_test.cpp
         ./column/column_view_test.cpp
+        ./column/column_hash_test.cpp
         ./column/array_view_column_test.cpp
         ./column/binary_column_test.cpp
         ./column/german_string_test.cpp
@@ -193,11 +194,14 @@ set(EXEC_FILES
         ./exprs/utility_functions_test.cpp
         ./exprs/runtime_filter_test.cpp
         ./exprs/subfield_expr_test.cpp
+        ./exprs/variant_path_parser_test.cpp
+        ./exprs/variant_functions_test.cpp
         ./exprs/vectorized_literal_test.cpp
         ./exprs/min_max_predicate_test.cpp
         ./exprs/in_const_predicate_test.cpp
         ./exprs/table_function/test_list_rowsets.cpp
         ./exprs/dict_expr_test.cpp
+        ./exprs/http_request_functions_test.cpp
         ./formats/csv/array_converter_test.cpp
         ./formats/csv/boolean_converter_test.cpp
         ./formats/csv/csv_file_writer_test.cpp
@@ -317,6 +321,7 @@ set(EXEC_FILES
         ./runtime/memory_scratch_sink_test.cpp
         ./runtime/command_executor_test.cpp
         ./runtime/exec_env_test.cpp
+        ./runtime/exec_sub_process_test.cpp
         ./runtime/load_fail_point_test.cpp
         ./runtime/query_statistics_test.cpp
         ./serde/column_array_serde_test.cpp
@@ -432,6 +437,7 @@ set(EXEC_FILES
         ./util/jvm_metrics_test.cpp
         ./util/llm_cache_test.cpp
         ./util/llm_query_service_test.cpp
+        ./util/network_util_test.cpp
         )
 
 if (${USE_AVX512})
@@ -497,6 +503,7 @@ SET(DW_TEST_FILES
     ./storage/lake/compaction_task_context_test.cpp
     ./storage/lake/condition_update_test.cpp
     ./storage/lake/delta_writer_test.cpp
+    ./storage/lake/filenames_test.cpp
     ./storage/lake/lake_data_source_test.cpp
     ./storage/lake/lake_delvec_loader_test.cpp
     ./storage/lake/lake_persistent_index_test.cpp
@@ -512,6 +519,7 @@ SET(DW_TEST_FILES
     ./storage/lake/replication_txn_manager_test.cpp
     ./storage/lake/rowset_test.cpp
     ./storage/lake/schema_change_test.cpp
+    ./storage/lake/lake_replication_txn_manager_test.cpp
     ./storage/lake/spill_mem_table_sink_test.cpp
     ./storage/lake/starlet_location_provider_test.cpp
     ./storage/lake/tablet_manager_test.cpp
@@ -596,6 +604,7 @@ SET(DW_TEST_FILES
     ./storage/size_tiered_compaction_policy_test.cpp
     ./storage/snapshot_meta_test.cpp
     ./storage/sstable/sstable_predicate_test.cpp
+    ./storage/sstable/concatenating_iterator_test.cpp
     ./storage/storage_engine_test.cpp
     ./storage/storage_types_test.cpp
     ./storage/table_reader_remote_test.cpp

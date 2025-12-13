@@ -25,7 +25,6 @@ import com.starrocks.authorization.PrivilegeBuiltinConstants;
 import com.starrocks.catalog.Column;
 import com.starrocks.catalog.Database;
 import com.starrocks.catalog.IcebergTable;
-import com.starrocks.catalog.KeysType;
 import com.starrocks.catalog.LocalTablet;
 import com.starrocks.catalog.OlapTable;
 import com.starrocks.catalog.Partition;
@@ -46,6 +45,7 @@ import com.starrocks.server.GlobalStateMgr;
 import com.starrocks.server.WarehouseManager;
 import com.starrocks.sql.ast.AggregateType;
 import com.starrocks.sql.ast.ColumnDef;
+import com.starrocks.sql.ast.KeysType;
 import com.starrocks.sql.ast.expression.Expr;
 import com.starrocks.sql.ast.expression.ExprToSql;
 import com.starrocks.sql.ast.expression.SlotRef;
@@ -129,6 +129,7 @@ public class StatisticUtils {
         // default value is 4, avoid generate too many chunk source for collect stats in BE
         context.getSessionVariable().setConnectorIoTasksPerScanOperator(Config.collect_stats_io_tasks_per_connector_operator);
         context.getSessionVariable().setEnableSPMRewrite(false);
+        context.getSessionVariable().setSingleNodeExecPlan(false);
 
         WarehouseManager manager = GlobalStateMgr.getCurrentState().getWarehouseMgr();
         Warehouse warehouse = manager.getBackgroundWarehouse();
@@ -324,10 +325,10 @@ public class StatisticUtils {
         ScalarType tableUUIDType = TypeFactory.createVarcharType(65530);
         ScalarType partitionNameType = TypeFactory.createVarcharType(65530);
         ScalarType dbNameType = TypeFactory.createVarcharType(65530);
-        ScalarType maxType = TypeFactory.createOlapMaxVarcharType();
-        ScalarType minType = TypeFactory.createOlapMaxVarcharType();
-        ScalarType bucketsType = TypeFactory.createOlapMaxVarcharType();
-        ScalarType mostCommonValueType = TypeFactory.createOlapMaxVarcharType();
+        ScalarType maxType = TypeFactory.createVarcharType(Config.max_varchar_length);
+        ScalarType minType = TypeFactory.createVarcharType(Config.max_varchar_length);
+        ScalarType bucketsType = TypeFactory.createVarcharType(Config.max_varchar_length);
+        ScalarType mostCommonValueType = TypeFactory.createVarcharType(Config.max_varchar_length);
         ScalarType catalogNameType = TypeFactory.createVarcharType(65530);
 
         if (tableName.equals(StatsConstants.SAMPLE_STATISTICS_TABLE_NAME)) {

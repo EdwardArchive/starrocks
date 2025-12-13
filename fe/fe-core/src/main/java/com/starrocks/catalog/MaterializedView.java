@@ -73,6 +73,7 @@ import com.starrocks.sql.analyzer.RelationFields;
 import com.starrocks.sql.analyzer.RelationId;
 import com.starrocks.sql.analyzer.Scope;
 import com.starrocks.sql.analyzer.SelectAnalyzer;
+import com.starrocks.sql.ast.KeysType;
 import com.starrocks.sql.ast.ParseNode;
 import com.starrocks.sql.ast.expression.Expr;
 import com.starrocks.sql.ast.expression.ExprToSql;
@@ -1392,6 +1393,11 @@ public class MaterializedView extends OlapTable implements GsonPreProcessable, G
         analyzePartitionInfo();
         // analyze mv partition exprs
         analyzePartitionExprs();
+
+        if (tableProperty != null) {
+            tableProperty.buildConstraint();
+        }
+        
         // register constraints from global state manager
         GlobalConstraintManager globalConstraintManager = GlobalStateMgr.getCurrentState().getGlobalConstraintManager();
         globalConstraintManager.registerConstraint(this);

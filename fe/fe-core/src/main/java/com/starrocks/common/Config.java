@@ -2246,7 +2246,9 @@ public class Config extends ConfigBase {
     public static int statistic_analyze_task_pool_size = 3;
 
     /**
-     * statistic collect query timeout
+     * statistic collect query timeout (in seconds)
+     * This is the total timeout for the entire analyze job, not for individual SQL tasks.
+     * Each SQL task within the job will use the remaining time based on the job start time.
      */
     @ConfField(mutable = true)
     public static long statistic_collect_query_timeout = 3600; // 1h
@@ -2808,8 +2810,11 @@ public class Config extends ConfigBase {
             comment = "Enable the sql digest feature, building a parameterized digest for each sql in the query detail")
     public static boolean enable_sql_digest = false;
 
-    @ConfField(mutable = true, comment = "explain level of query plan in this detail")
+    @ConfField(mutable = true, comment = "explain level of query plan in query_detail API")
     public static String query_detail_explain_level = "COSTS";
+
+    @ConfField(mutable = true, comment = "explain level of query plan")
+    public static String query_explain_level = "NORMAL";
 
     /**
      * StarRocks-manager pull queries every 1 second
@@ -3044,7 +3049,7 @@ public class Config extends ConfigBase {
 
     /**
      * If set to false, when the load is empty, success is returned.
-     * Otherwise, `No partitions have data available for loading` is returned.
+     * Otherwise, `No rows were imported from upstream` is returned.
      */
     @ConfField(mutable = true)
     public static boolean empty_load_as_error = true;
@@ -3209,6 +3214,9 @@ public class Config extends ConfigBase {
 
     @ConfField(mutable = true, comment = "metadata expired time from full vacuum begin running")
     public static long lake_fullvacuum_meta_expired_seconds = 3600L * 24L * 2L;
+
+    @ConfField(mutable = true, comment = "Whether to enable full vacuum daemon")
+    public static boolean lake_enable_fullvacuum = false;
 
     @ConfField(mutable = true, comment =
             "Whether enable throttling ingestion speed when compaction score exceeds the threshold.\n" +
@@ -3574,6 +3582,13 @@ public class Config extends ConfigBase {
 
     @ConfField(mutable = true, comment = "Whether enable to cache mv query context or not")
     public static boolean enable_mv_query_context_cache = true;
+
+    @ConfField(mutable = true, comment = "Whether enable to cache mv global context or not which its lifecycle is " +
+            "as the same with the mv")
+    public static boolean enable_mv_global_context_cache = true;
+
+    @ConfField(mutable = true, comment = "Max materialized view global context cache size during one mv's lifecycle.")
+    public static long mv_global_context_cache_max_size = 5000;
 
     @ConfField(mutable = true, comment = "Mv refresh fails if there is filtered data, true by default")
     public static boolean mv_refresh_fail_on_filter_data = true;
@@ -4060,4 +4075,33 @@ public class Config extends ConfigBase {
     public static int compound_predicate_flatten_threshold = 512;
 
     @ConfField public static int ui_queries_sql_statement_max_length = 128;
+
+    /**
+     * http_request function settings
+     * Admin-enforced SSL verification for http_request function.
+     * If true, SSL peer and host verification cannot be disabled via session variables.
+     */
+    @ConfField(mutable = true, comment = "Enforce SSL verification for http_request function (cannot be disabled by users)")
+    public static boolean http_request_ssl_verification_required = true;
+
+    /**
+     * http_request function SSRF protection settings
+     * Security level: 1=TRUSTED (allow all), 2=PUBLIC (block private IPs),
+     * 3=RESTRICTED (require allowlist, default), 4=PARANOID (block all requests)
+     */
+    @ConfField(mutable = true, comment = "HTTP request security level for SSRF protection: " +
+            "1=TRUSTED (allow all), 2=PUBLIC (block private IPs), " +
+            "3=RESTRICTED (require allowlist, default), 4=PARANOID (block all requests)")
+    public static int http_request_security_level = 3;
+
+    @ConfField(mutable = true, comment = "Comma-separated list of allowed IPv4 addresses for http_request function. " +
+            "Example: '192.168.1.1' or '10.0.0.1,172.16.0.1'")
+    public static String http_request_ip_allowlist = "";
+
+    @ConfField(mutable = true, comment = "Comma-separated list of regex patterns for allowed hostnames in http_request function")
+    public static String http_request_host_allowlist_regexp = "";
+
+    @ConfField(mutable = true, comment = "Allow private IPs (127.x, 10.x, 192.168.x, 172.16-31.x) if in allowlist. " +
+            "Default false for security. Set true to allow internal service calls.")
+    public static boolean http_request_allow_private_in_allowlist = false;
 }

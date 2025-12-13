@@ -286,7 +286,7 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
 
-import static com.starrocks.common.ErrorCode.ERR_NO_PARTITIONS_HAVE_DATA_LOAD;
+import static com.starrocks.common.ErrorCode.ERR_NO_ROWS_IMPORTED;
 import static com.starrocks.sql.parser.ErrorMsgProxy.PARSER_ERROR_MSG;
 import static com.starrocks.statistic.AnalyzeMgr.IS_MULTI_COLUMN_STATS;
 
@@ -546,6 +546,12 @@ public class StmtExecutor {
         return null;
     }
 
+    /**
+     * The execution timeout varies among different statements:
+     * 1. SELECT: use query_timeout
+     * 2. DML: use insert_timeout or statement-specified timeout
+     * 3. ANALYZE: use fe_conf.statistic_collect_query_timeout
+     */
     public int getExecTimeout() {
         if (parsedStmt instanceof CreateTableAsSelectStmt ctas) {
             Map<String, String> properties = ctas.getInsertStmt().getProperties();
@@ -567,6 +573,8 @@ public class StmtExecutor {
                 }
             }
             return ConnectContext.get().getSessionVariable().getInsertTimeoutS();
+        } else if (parsedStmt instanceof AnalyzeStmt) {
+            return (int) Config.statistic_collect_query_timeout;
         } else {
             return ConnectContext.get().getSessionVariable().getQueryTimeoutS();
         }
@@ -684,8 +692,8 @@ public class StmtExecutor {
         }
 
         final boolean shouldMarkIdleCheck = shouldMarkIdleCheck(parsedStmt);
-        final long originWarehouseId = context.getCurrentWarehouseId();
-        if (shouldMarkIdleCheck) {
+        final Long originWarehouseId = context.getCurrentWarehouseIdAllowNull();
+        if (shouldMarkIdleCheck && originWarehouseId != null) {
             WarehouseIdleChecker.increaseRunningSQL(originWarehouseId);
         }
 
@@ -974,7 +982,7 @@ public class StmtExecutor {
             // restore session variable in connect context
             context.setSessionVariable(sessionVariableBackup);
 
-            if (shouldMarkIdleCheck) {
+            if (shouldMarkIdleCheck && originWarehouseId != null) {
                 WarehouseIdleChecker.decreaseRunningSQL(originWarehouseId);
             }
 
@@ -2180,7 +2188,7 @@ public class StmtExecutor {
 
         ShowResultSetMetaData metaData =
                 ShowResultSetMetaData.builder()
-                        .addColumn(new Column("Explain String", TypeFactory.createVarchar(20)))
+                        .addColumn(new Column("Explain String", TypeFactory.createVarcharType(20)))
                         .build();
         sendMetaData(metaData);
 
@@ -2806,8 +2814,7 @@ public class StmtExecutor {
                             targetTable.isHiveTable() || targetTable.isTableFunctionTable() ||
                             targetTable.isBlackHoleTable())) {
                         // schema table and iceberg table does not need txn
-                        mgr.abortTransaction(database.getId(), transactionId,
-                                ERR_NO_PARTITIONS_HAVE_DATA_LOAD.formatErrorMsg(),
+                        mgr.abortTransaction(database.getId(), transactionId, ERR_NO_ROWS_IMPORTED.formatErrorMsg(),
                                 Coordinator.getCommitInfos(coord), Coordinator.getFailInfos(coord), null);
                     }
                     context.getState().setOk();

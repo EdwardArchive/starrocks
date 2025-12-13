@@ -439,6 +439,25 @@ vectorized_functions = [
 
     [30460, 'format_bytes', True, False, 'VARCHAR', ['BIGINT'], 'StringFunctions::format_bytes'],
 
+    # HTTP Request function - HTTP/HTTPS request scalar function with Named Parameters
+    # http_request(url, method, body, headers, timeout_ms, ssl_verify, username, password)
+    [30470, 'http_request', True, False, 'VARCHAR',
+     ['VARCHAR', 'VARCHAR', 'VARCHAR', 'VARCHAR', 'INT', 'BOOLEAN', 'VARCHAR', 'VARCHAR'],
+     'HttpRequestFunctions::http_request',
+     'HttpRequestFunctions::http_request_prepare', 'HttpRequestFunctions::http_request_close',
+     {
+         'named_args': [
+             {'name': 'url'},
+             {'name': 'method', 'default': 'GET'},
+             {'name': 'body', 'default': ''},
+             {'name': 'headers', 'default': '{}'},
+             {'name': 'timeout_ms', 'default': 30000},
+             {'name': 'ssl_verify', 'default': True},
+             {'name': 'username', 'default': ''},
+             {'name': 'password', 'default': ''}
+         ]
+     }],
+
     # Binary Functions
     # to_binary
     [30600, 'to_binary', True, True, 'VARBINARY', ['VARCHAR', 'VARCHAR'], 'BinaryFunctions::to_binary',
@@ -881,9 +900,14 @@ vectorized_functions = [
      "JsonFunctions::native_json_path_prepare", "JsonFunctions::native_json_path_close"],
     [110024, "json_remove", False, False, "JSON", ["JSON", "VARCHAR", "..."], "JsonFunctions::json_remove",
      "JsonFunctions::native_json_path_prepare", "JsonFunctions::native_json_path_close"],
+    [110025, "json_set", False, False, "JSON", ["JSON", "JSON", "..."], "JsonFunctions::json_set"],
     [110100, "to_json", False, False, "JSON", ["ANY_MAP"], "JsonFunctions::to_json"],
     [110101, "to_json", False, False, "JSON", ["ANY_STRUCT"], "JsonFunctions::to_json"],
     [110112, "json_contains", False, False, "BOOLEAN", ["JSON", "JSON"], "JsonFunctions::json_contains"],
+
+    # variant type function
+    [110200, "variant_query", False, False, "VARIANT", ["VARIANT", "VARCHAR"], "VariantFunctions::variant_query",
+     "VariantFunctions::variant_segments_prepare", "VariantFunctions::variant_segments_close"],
 
     # aes and base64 function
     # aes_encrypt: 2-parameter version (data, key) for backward compatibility with old FE

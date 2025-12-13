@@ -16,7 +16,6 @@
 
 #include <arpa/inet.h>
 
-#include <functional>
 #include <iostream>
 #include <memory>
 #include <random>
@@ -127,7 +126,7 @@ private:
     // equals with dop of dest pipeline
     // If pipeline level shuffle is disable, the size of _chunks
     // always be 1
-    std::vector<std::unique_ptr<Chunk>> _chunks;
+    std::vector<ChunkUniquePtr> _chunks;
     PTransmitChunkParamsPtr _chunk_request;
     size_t _current_request_bytes = 0;
 
@@ -262,7 +261,7 @@ Status ExchangeSinkOperator::Channel::send_one_chunk(RuntimeState* state, const 
         _chunk_request->set_eos(eos);
         _chunk_request->set_use_pass_through(_use_pass_through);
         butil::IOBuf attachment;
-        _parent->construct_brpc_attachment(_chunk_request, attachment);
+        TRY_CATCH_BAD_ALLOC(_parent->construct_brpc_attachment(_chunk_request, attachment));
         TransmitChunkInfo info = {this->_fragment_instance_id, _brpc_stub,     std::move(_chunk_request), attachment,
                                   _current_request_bytes,      _brpc_dest_addr};
         RETURN_IF_ERROR(_parent->_buffer->add_request(info));
@@ -395,6 +394,12 @@ Status ExchangeSinkOperator::prepare(RuntimeState* state) {
     RETURN_IF_ERROR(Operator::prepare(state));
 
     _buffer->incr_sinker(state);
+    _buffer->attach_observer(state, observer());
+    return Status::OK();
+}
+
+Status ExchangeSinkOperator::prepare_local_state(RuntimeState* state) {
+    RETURN_IF_ERROR(Operator::prepare_local_state(state));
 
     _be_number = state->be_number();
     if (state->query_options().__isset.transmission_encode_level) {
@@ -466,7 +471,7 @@ Status ExchangeSinkOperator::prepare(RuntimeState* state) {
 
     _shuffle_channel_ids.resize(state->chunk_size());
     _row_indexes.resize(state->chunk_size());
-    _buffer->attach_observer(state, observer());
+
     return Status::OK();
 }
 
@@ -475,15 +480,17 @@ bool ExchangeSinkOperator::is_finished() const {
 }
 
 bool ExchangeSinkOperator::need_input() const {
-    return !is_finished() && _buffer != nullptr && !_buffer->is_full();
+    return !is_finished() && !_buffer->is_full();
 }
 
 bool ExchangeSinkOperator::pending_finish() const {
-    return _buffer != nullptr && !_buffer->is_finished();
+    return _driver_sequence == 0 && !_buffer->is_finished();
 }
 
 Status ExchangeSinkOperator::set_cancelled(RuntimeState* state) {
-    _buffer->cancel_one_sinker(state);
+    if (_driver_sequence == 0) {
+        _buffer->cancel_one_sinker(state);
+    }
     return Status::OK();
 }
 
@@ -793,8 +800,14 @@ int64_t ExchangeSinkOperator::construct_brpc_attachment(const PTransmitChunkPara
 
 std::string ExchangeSinkOperator::get_name() const {
     std::string finished = is_finished() ? "X" : "O";
-    return fmt::format("{}_{}_{}({}) {{ pending_finish:{} }}", _name, _plan_node_id, (void*)this, finished,
-                       pending_finish());
+    return fmt::format("{}_{}_{}({}) {{ pending_finish:{} buffer:{} }}", _name, _plan_node_id, (void*)this, finished,
+                       pending_finish(), _buffer->to_string());
+}
+
+void ExchangeSinkOperator::set_execute_mode(int performance_level) {
+    size_t max_memory_usage = config::exchg_node_buffer_size_bytes;
+    max_memory_usage = max_memory_usage * std::max(1, _num_sinkers.load());
+    _buffer->update_memory_limit(max_memory_usage);
 }
 
 ExchangeSinkOperatorFactory::ExchangeSinkOperatorFactory(

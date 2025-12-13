@@ -70,6 +70,7 @@ import com.starrocks.catalog.MaterializedView;
 import com.starrocks.catalog.MetadataViewer;
 import com.starrocks.catalog.OlapTable;
 import com.starrocks.catalog.Partition;
+import com.starrocks.catalog.PartitionNames;
 import com.starrocks.catalog.PhysicalPartition;
 import com.starrocks.catalog.Replica;
 import com.starrocks.catalog.Table;
@@ -100,6 +101,7 @@ import com.starrocks.common.proc.LocalTabletsProcDir;
 import com.starrocks.common.proc.OptimizeProcDir;
 import com.starrocks.common.proc.PartitionsProcDir;
 import com.starrocks.common.proc.ProcNodeInterface;
+import com.starrocks.common.proc.ProcService;
 import com.starrocks.common.proc.SchemaChangeProcDir;
 import com.starrocks.common.util.DateUtils;
 import com.starrocks.common.util.DebugUtil;
@@ -154,8 +156,8 @@ import com.starrocks.sql.ast.DescStorageVolumeStmt;
 import com.starrocks.sql.ast.DescribeStmt;
 import com.starrocks.sql.ast.HelpStmt;
 import com.starrocks.sql.ast.ImportColumnDesc;
+import com.starrocks.sql.ast.OrderByElement;
 import com.starrocks.sql.ast.OrderByPair;
-import com.starrocks.sql.ast.PartitionNames;
 import com.starrocks.sql.ast.PartitionRef;
 import com.starrocks.sql.ast.ShowAlterStmt;
 import com.starrocks.sql.ast.ShowAnalyzeJobStmt;
@@ -428,9 +430,19 @@ public class ShowExecutor {
         @Override
         public ShowResultSet visitShowProcStmt(ShowProcStmt statement, ConnectContext context) {
             ShowResultSetMetaData metaData = showResultMetaFactory.getMetadata(statement);
-            ProcNodeInterface procNode = statement.getNode();
+            String path = statement.getPath();
+            if (Strings.isNullOrEmpty(path)) {
+                throw new SemanticException("Path is null");
+            }
 
-            List<List<String>> finalRows = null;
+            ProcNodeInterface procNode;
+            try {
+                procNode = ProcService.getInstance().open(path);
+            } catch (AnalysisException e) {
+                throw new SemanticException(String.format("Unknown proc node path: %s. msg: %s", path, e.getMessage()));
+            }
+
+            List<List<String>> finalRows;
             try {
                 finalRows = procNode.fetchResult().getRows();
             } catch (AnalysisException e) {
@@ -443,8 +455,8 @@ public class ShowExecutor {
         @Override
         public ShowResultSet visitHelpStatement(HelpStmt statement, ConnectContext context) {
             ShowResultSetMetaData metaData = ShowResultSetMetaData.builder()
-                    .addColumn(new Column("name", TypeFactory.createVarchar(64)))
-                    .addColumn(new Column("is_it_category", TypeFactory.createVarchar(1)))
+                    .addColumn(new Column("name", TypeFactory.createVarcharType(64)))
+                    .addColumn(new Column("is_it_category", TypeFactory.createVarcharType(1)))
                     .build();
             return new ShowResultSet(metaData, EMPTY_SET);
         }
@@ -680,10 +692,24 @@ public class ShowExecutor {
         @Override
         public ShowResultSet visitDescTableStmt(DescribeStmt statement, ConnectContext context) {
             try {
-                return new ShowResultSet(showResultMetaFactory.getMetadata(statement), statement.getResultRows());
+                List<List<String>> resultRows = getDescribeResultRows(statement);
+                return new ShowResultSet(showResultMetaFactory.getMetadata(statement), resultRows);
             } catch (AnalysisException e) {
                 throw new SemanticException(e.getMessage());
             }
+        }
+
+        private List<List<String>> getDescribeResultRows(DescribeStmt statement) throws AnalysisException {
+            if (statement.isAllTables() || statement.isMaterializedView() || statement.isTableFunctionTable()) {
+                return statement.getResultRows();
+            }
+
+            String procPath = statement.getProcPath();
+            if (Strings.isNullOrEmpty(procPath)) {
+                throw new AnalysisException("Proc path is null");
+            }
+            ProcNodeInterface node = ProcService.getInstance().open(procPath);
+            return node.fetchResult().getRows();
         }
 
         @Override
@@ -758,8 +784,10 @@ public class ShowExecutor {
                                         }
 
                                         ShowResultSetMetaData showResultSetMetaData = ShowResultSetMetaData.builder()
-                                                .addColumn(new Column("Materialized View", TypeFactory.createVarchar(20)))
-                                                .addColumn(new Column("Create Materialized View", TypeFactory.createVarchar(30)))
+                                                .addColumn(new Column("Materialized View",
+                                                        TypeFactory.createVarcharType(20)))
+                                                .addColumn(new Column("Create Materialized View",
+                                                        TypeFactory.createVarcharType(30)))
                                                 .build();
                                         return new ShowResultSet(showResultSetMetaData, rows);
                                     }
@@ -784,10 +812,10 @@ public class ShowExecutor {
                     rows.add(Lists.newArrayList(table.getName(), createTableStmt.get(0), "utf8", "utf8_general_ci"));
 
                     ShowResultSetMetaData showViewResultSetMeta = ShowResultSetMetaData.builder()
-                            .addColumn(new Column("View", TypeFactory.createVarchar(20)))
-                            .addColumn(new Column("Create View", TypeFactory.createVarchar(30)))
-                            .addColumn(new Column("character_set_client", TypeFactory.createVarchar(30)))
-                            .addColumn(new Column("collation_connection", TypeFactory.createVarchar(30)))
+                            .addColumn(new Column("View", TypeFactory.createVarcharType(20)))
+                            .addColumn(new Column("Create View", TypeFactory.createVarcharType(30)))
+                            .addColumn(new Column("character_set_client", TypeFactory.createVarcharType(30)))
+                            .addColumn(new Column("collation_connection", TypeFactory.createVarcharType(30)))
                             .build();
                     return new ShowResultSet(showViewResultSetMeta, rows);
                 } else if (table instanceof MaterializedView) {
@@ -799,17 +827,17 @@ public class ShowExecutor {
                         rows.add(Lists.newArrayList(table.getName(), sb, "utf8", "utf8_general_ci"));
 
                         ShowResultSetMetaData showViewResultSetMeta = ShowResultSetMetaData.builder()
-                                .addColumn(new Column("View", TypeFactory.createVarchar(20)))
-                                .addColumn(new Column("Create View", TypeFactory.createVarchar(30)))
-                                .addColumn(new Column("character_set_client", TypeFactory.createVarchar(30)))
-                                .addColumn(new Column("collation_connection", TypeFactory.createVarchar(30)))
+                                .addColumn(new Column("View", TypeFactory.createVarcharType(20)))
+                                .addColumn(new Column("Create View", TypeFactory.createVarcharType(30)))
+                                .addColumn(new Column("character_set_client", TypeFactory.createVarcharType(30)))
+                                .addColumn(new Column("collation_connection", TypeFactory.createVarcharType(30)))
                                 .build();
                         return new ShowResultSet(showViewResultSetMeta, rows);
                     } else {
                         rows.add(Lists.newArrayList(table.getName(), createTableStmt.get(0)));
                         ShowResultSetMetaData showResultSetMetaData = ShowResultSetMetaData.builder()
-                                .addColumn(new Column("Materialized View", TypeFactory.createVarchar(20)))
-                                .addColumn(new Column("Create Materialized View", TypeFactory.createVarchar(30)))
+                                .addColumn(new Column("Materialized View", TypeFactory.createVarcharType(20)))
+                                .addColumn(new Column("Create Materialized View", TypeFactory.createVarcharType(30)))
                                 .build();
                         return new ShowResultSet(showResultSetMetaData, rows);
                     }
@@ -846,8 +874,8 @@ public class ShowExecutor {
                 rows.add(Lists.newArrayList(tableName, createViewSql));
 
                 ShowResultSetMetaData showResultSetMetaData = ShowResultSetMetaData.builder()
-                        .addColumn(new Column("View", TypeFactory.createVarchar(20)))
-                        .addColumn(new Column("Create View", TypeFactory.createVarchar(30)))
+                        .addColumn(new Column("View", TypeFactory.createVarcharType(20)))
+                        .addColumn(new Column("Create View", TypeFactory.createVarcharType(30)))
                         .build();
                 return new ShowResultSet(showResultSetMetaData, rows);
             } else {
@@ -1059,7 +1087,7 @@ public class ShowExecutor {
             // Only success
             ShowResultSetMetaData showMetaData = statement.getIsVerbose() ? showResultMetaFactory.getMetadata(statement) :
                     ShowResultSetMetaData.builder()
-                            .addColumn(new Column("Function Name", TypeFactory.createVarchar(256))).build();
+                            .addColumn(new Column("Function Name", TypeFactory.createVarcharType(256))).build();
             return new ShowResultSet(showMetaData, resultRowSet);
         }
 
@@ -1430,8 +1458,19 @@ public class ShowExecutor {
 
         @Override
         public ShowResultSet visitShowAlterStatement(ShowAlterStmt statement, ConnectContext context) {
-            ProcNodeInterface procNodeI = statement.getNode();
-            Preconditions.checkNotNull(procNodeI);
+            String procPath = statement.getProcPath();
+            if (Strings.isNullOrEmpty(procPath)) {
+                throw new SemanticException("Proc path is null");
+            }
+
+            ProcNodeInterface procNodeI;
+            try {
+                procNodeI = ProcService.getInstance().open(procPath);
+            } catch (AnalysisException e) {
+                ErrorReport.reportSemanticException(ErrorCode.ERR_WRONG_PROC_PATH, procPath);
+                return null;
+            }
+
             List<List<String>> rows;
             try {
                 // Only SchemaChangeProc support where/order by/limit syntax
@@ -1672,15 +1711,45 @@ public class ShowExecutor {
 
         @Override
         public ShowResultSet visitShowPartitionsStatement(ShowPartitionsStmt statement, ConnectContext context) {
-            ProcNodeInterface procNodeI = statement.getNode();
-            Preconditions.checkNotNull(procNodeI);
+            String procPath = statement.getProcPath();
+            if (Strings.isNullOrEmpty(procPath)) {
+                throw new SemanticException("Proc path is null");
+            }
+
+            ProcNodeInterface procNodeI;
+            try {
+                procNodeI = ProcService.getInstance().open(procPath);
+            } catch (AnalysisException e) {
+                throw new SemanticException("get the PROC Node by the path %s error: %s", procPath, e.getMessage());
+            }
+
+            List<OrderByPair> orderByPairs = analyzePartitionOrderBy(statement.getOrderByElements(), procNodeI);
+            statement.setOrderByPairs(orderByPairs);
             try {
                 List<List<String>> rows = ((PartitionsProcDir) procNodeI).fetchResultByFilter(statement.getFilterMap(),
-                        statement.getOrderByPairs(), statement.getLimitElement()).getRows();
+                        orderByPairs, statement.getLimitElement()).getRows();
                 return new ShowResultSet(showResultMetaFactory.getMetadata(statement), rows);
             } catch (AnalysisException e) {
                 throw new SemanticException(e.getMessage());
             }
+        }
+
+        private List<OrderByPair> analyzePartitionOrderBy(List<OrderByElement> orderByElements,
+                                                          ProcNodeInterface node) {
+            List<OrderByPair> orderByPairs = new ArrayList<>();
+            if (orderByElements == null || orderByElements.isEmpty()) {
+                return orderByPairs;
+            }
+
+            for (OrderByElement orderByElement : orderByElements) {
+                if (!(orderByElement.getExpr() instanceof SlotRef)) {
+                    throw new SemanticException("Should order by column");
+                }
+                SlotRef slotRef = (SlotRef) orderByElement.getExpr();
+                int index = ((PartitionsProcDir) node).analyzeColumn(slotRef.getColumnName());
+                orderByPairs.add(new OrderByPair(index, !orderByElement.getIsAsc()));
+            }
+            return orderByPairs;
         }
 
         @Override
@@ -1820,7 +1889,7 @@ public class ShowExecutor {
                     boolean stop = false;
                     Collection<Partition> partitions = new ArrayList<>();
                     if (statement.hasPartition()) {
-                        PartitionNames partitionNames = statement.getPartitionNames();
+                        PartitionRef partitionNames = statement.getPartitionNames();
                         for (String partName : partitionNames.getPartitionNames()) {
                             Partition partition = olapTable.getPartition(partName, partitionNames.isTemp());
                             if (partition == null) {

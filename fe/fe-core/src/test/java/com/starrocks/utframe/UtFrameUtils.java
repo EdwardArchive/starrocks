@@ -59,6 +59,7 @@ import com.starrocks.catalog.Table;
 import com.starrocks.catalog.TableName;
 import com.starrocks.catalog.Tablet;
 import com.starrocks.catalog.UserIdentity;
+import com.starrocks.catalog.mv.MVTimelinessArbiter;
 import com.starrocks.common.AnalysisException;
 import com.starrocks.common.Config;
 import com.starrocks.common.DdlException;
@@ -279,7 +280,7 @@ public class UtFrameUtils {
 
         feConfMap.put("run_mode", runMode.getName());
         if (runMode == RunMode.SHARED_DATA) {
-            feConfMap.put("cloud_native_meta_port", String.valueOf(findValidPort()));
+            feConfMap.put("cloud_native_meta_port", "0"); // auto detect available port
             feConfMap.put("enable_load_volume_from_conf", "true");
             feConfMap.put("cloud_native_storage_type", "S3");
             feConfMap.put("aws_s3_path", "dummy_unittest_bucket/dummy_sub_path");
@@ -453,7 +454,7 @@ public class UtFrameUtils {
                     continue;
                 }
 
-                System.out.println("find valid port " + port + new Date());
+                System.out.println("find valid port " + port + " at " + new Date());
                 return port;
             } catch (Exception e) {
                 e.printStackTrace();
@@ -1286,11 +1287,12 @@ public class UtFrameUtils {
     public static void mockTimelinessForAsyncMVTest(ConnectContext connectContext) {
         new MockUp<MvRefreshArbiter>() {
             /**
-             * {@link MvRefreshArbiter#getMVTimelinessUpdateInfo(MaterializedView, boolean)}
+             * {@link MvRefreshArbiter#getMVTimelinessUpdateInfo(MaterializedView,
+             * com.starrocks.catalog.mv.MVTimelinessArbiter.QueryRewriteParams)}
              */
             @Mock
             public MvUpdateInfo getMVTimelinessUpdateInfo(MaterializedView mv,
-                                                          boolean isQueryRewrite) {
+                                                          MVTimelinessArbiter.QueryRewriteParams queryRewriteParams) {
                 return MvUpdateInfo.noRefresh(mv);
             }
         };
@@ -1358,6 +1360,11 @@ public class UtFrameUtils {
             // Disable text based rewrite by default.
             connectContext.getSessionVariable().setEnableMaterializedViewTextMatchRewrite(false);
             connectContext.getSessionVariable().setTraceLogLevel(10);
+            connectContext.getSessionVariable().setEnableSingleNodeSchedule(false);
+            // Also disable SingleNodeSchedule in the global default session variable
+            // This ensures that any new ConnectContext created (e.g., by TaskRun) will inherit this setting
+            GlobalStateMgr.getCurrentState().getVariableMgr().getDefaultSessionVariable()
+                    .setEnableSingleNodeSchedule(false);
         }
 
         new MockUp<PlanTestBase>() {
