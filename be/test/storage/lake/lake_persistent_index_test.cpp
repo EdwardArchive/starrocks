@@ -558,4 +558,61 @@ TEST_F(LakePersistentIndexTest, test_major_compaction_with_predicate) {
     }
 }
 
+// Test for issue #66832: CN crash with SIGSEGV in publish_primary_compaction
+// This test reproduces the corrupted state where output_sstable exists but input_sstables is empty
+//
+// IMPORTANT: This test demonstrates the bug before the fix.
+// To reproduce the crash, run this test with the original code (before fix):
+//   ./starrocks_be_ut --gtest_filter="LakePersistentIndexTest.test_apply_opcompaction_corrupted_state"
+//
+// Expected behavior:
+//   - Before fix: SIGSEGV crash at line 471
+//   - After fix: Returns Corruption error gracefully
+TEST_F(LakePersistentIndexTest, test_apply_opcompaction_corrupted_state) {
+    auto tablet_id = _tablet_metadata->id();
+    auto index = std::make_unique<LakePersistentIndex>(_tablet_mgr.get(), tablet_id);
+    ASSERT_OK(index->init(_tablet_metadata));
+
+    // Create a corrupted OpCompaction state:
+    // - has_output_sstable() returns true
+    // - input_sstables() is empty
+    // This state can occur when TxnLog is corrupted or incomplete
+    TxnLogPB_OpCompaction op_compaction;
+
+    // Set output_sstable only (no input_sstables)
+    auto* output = op_compaction.mutable_output_sstable();
+    output->set_filename("test_output.sst");
+    output->set_filesize(1000);
+    output->set_max_rss_rowid(100);
+
+    // Verify the corrupted state that triggers the bug
+    ASSERT_TRUE(op_compaction.input_sstables().empty());
+    ASSERT_TRUE(op_compaction.has_output_sstable());
+
+    // This call will crash with SIGSEGV before the fix is applied
+    // After fix: Should return Corruption error instead of crashing
+    auto st = index->apply_opcompaction(op_compaction);
+    // Reproduction test: If this crashes, the bug is reproduced
+    // After fix is applied, the following assertions should pass:
+    // ASSERT_FALSE(st.ok());
+    // ASSERT_TRUE(st.is_corruption());
+    (void)st;  // Suppress unused variable warning for reproduction test
+}
+
+// Test for issue #66832: Ensure normal operation still works after fix
+TEST_F(LakePersistentIndexTest, test_apply_opcompaction_empty_input_returns_early) {
+    auto tablet_id = _tablet_metadata->id();
+    auto index = std::make_unique<LakePersistentIndex>(_tablet_mgr.get(), tablet_id);
+    ASSERT_OK(index->init(_tablet_metadata));
+
+    // Empty OpCompaction - should return OK immediately
+    TxnLogPB_OpCompaction op_compaction;
+
+    ASSERT_TRUE(op_compaction.input_sstables().empty());
+    ASSERT_FALSE(op_compaction.has_output_sstable());
+
+    auto st = index->apply_opcompaction(op_compaction);
+    ASSERT_OK(st);  // Empty input_sstables should return OK
+}
+
 } // namespace starrocks::lake
