@@ -27,6 +27,7 @@ import com.starrocks.connector.ConnectorTableId;
 import com.starrocks.connector.MetastoreType;
 import com.starrocks.connector.PartitionUtil;
 import com.starrocks.connector.exception.StarRocksConnectorException;
+import com.starrocks.connector.hive.glue.projection.PartitionProjectionService;
 import com.starrocks.sql.ast.CreateTableLikeStmt;
 import com.starrocks.sql.ast.CreateTableStmt;
 import com.starrocks.sql.ast.ListPartitionDesc;
@@ -65,6 +66,7 @@ public class HiveMetastoreOperations {
     private final Configuration hadoopConf;
     private final MetastoreType metastoreType;
     private final String catalogName;
+    private final PartitionProjectionService partitionProjectionService;
 
     public HiveMetastoreOperations(CachingHiveMetastore cachingHiveMetastore,
                                    boolean enableCatalogLevelCache,
@@ -76,6 +78,7 @@ public class HiveMetastoreOperations {
         this.hadoopConf = hadoopConf;
         this.metastoreType = metastoreType;
         this.catalogName = catalogName;
+        this.partitionProjectionService = new PartitionProjectionService();
     }
 
     public List<String> getAllDatabaseNames() {
@@ -280,6 +283,15 @@ public class HiveMetastoreOperations {
     }
 
     public Map<String, Partition> getPartitionByPartitionKeys(Table table, List<PartitionKey> partitionKeys) {
+        // Check if partition projection is enabled for this table
+        if (table instanceof HiveTable && partitionProjectionService.isEnabled(table)) {
+            HiveTable hiveTable = (HiveTable) table;
+            LOG.debug("Using partition projection for table: {}.{}",
+                    hiveTable.getCatalogDBName(), hiveTable.getCatalogTableName());
+            return partitionProjectionService.getProjectedPartitions(hiveTable, partitionKeys);
+        }
+
+        // Standard metastore-based partition retrieval
         String dbName = (table).getCatalogDBName();
         String tblName = (table).getCatalogTableName();
         List<String> partitionColumnNames = (table).getPartitionColumnNames();
