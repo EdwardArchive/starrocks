@@ -17,8 +17,6 @@ package com.starrocks.connector.hive.glue.projection;
 import com.starrocks.type.VarcharType;
 import org.junit.jupiter.api.Test;
 
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
 
