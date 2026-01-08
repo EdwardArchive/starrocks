@@ -250,4 +250,142 @@ public class PartitionProjectionService {
         PartitionProjection projection = createProjection(table);
         return projection.getProjectedPartitions(partitionFilters);
     }
+
+    /**
+     * Gets all projected partition names for a table.
+     * This is used to list all possible partitions based on projection configuration.
+     *
+     * @param table the Hive table with projection enabled
+     * @return list of partition names in the format "col1=val1/col2=val2"
+     */
+    public List<String> getProjectedPartitionNames(HiveTable table) {
+        LOG.debug("Getting projected partition names for table: {}.{}",
+                table.getCatalogDBName(), table.getCatalogTableName());
+
+        PartitionProjection projection = createProjection(table);
+
+        // Get all projected partitions without any filter
+        Map<String, Optional<Object>> emptyFilters = new HashMap<>();
+        for (String columnName : table.getPartitionColumnNames()) {
+            emptyFilters.put(columnName, Optional.empty());
+        }
+
+        Map<String, Partition> partitions = projection.getProjectedPartitions(emptyFilters);
+        List<String> partitionNames = new java.util.ArrayList<>(partitions.keySet());
+
+        LOG.debug("Generated {} projected partition names for table: {}.{}",
+                partitionNames.size(), table.getCatalogDBName(), table.getCatalogTableName());
+
+        return partitionNames;
+    }
+
+    /**
+     * Gets projected partition names filtered by partition values.
+     * This is used when the query has partition predicates.
+     *
+     * @param table the Hive table with projection enabled
+     * @param partitionValues list of partition values (Optional.empty() means no filter for that column)
+     * @return list of partition names matching the filter
+     */
+    public List<String> getProjectedPartitionNamesByValue(HiveTable table, List<Optional<String>> partitionValues) {
+        LOG.info("[PartitionProjection] Getting projected partition names by value for table: {}.{}, values: {}",
+                table.getCatalogDBName(), table.getCatalogTableName(), partitionValues);
+
+        PartitionProjection projection = createProjection(table);
+        List<String> partitionColumnNames = table.getPartitionColumnNames();
+
+        // Convert partition values to filter map
+        Map<String, Optional<Object>> filters = new HashMap<>();
+        for (int i = 0; i < partitionColumnNames.size(); i++) {
+            String columnName = partitionColumnNames.get(i);
+            if (i < partitionValues.size() && partitionValues.get(i).isPresent()) {
+                filters.put(columnName, Optional.of(partitionValues.get(i).get()));
+            } else {
+                filters.put(columnName, Optional.empty());
+            }
+        }
+
+        LOG.info("[PartitionProjection] Filters: {}", filters);
+
+        Map<String, Partition> partitions = projection.getProjectedPartitions(filters);
+        List<String> partitionNames = new java.util.ArrayList<>(partitions.keySet());
+
+        LOG.info("[PartitionProjection] Generated {} projected partition names for table: {}.{}",
+                partitionNames.size(), table.getCatalogDBName(), table.getCatalogTableName());
+
+        return partitionNames;
+    }
+
+    /**
+     * Gets projected partitions from partition names.
+     * Partition names are in the format "col1=val1/col2=val2".
+     *
+     * @param table the Hive table with projection enabled
+     * @param partitionNames list of partition names
+     * @return map of partition name to Partition object
+     */
+    public Map<String, Partition> getProjectedPartitionsFromNames(HiveTable table,
+                                                                   List<String> partitionNames) {
+        LOG.debug("Getting projected partitions from names for table: {}.{}, partitionNames: {}",
+                table.getCatalogDBName(), table.getCatalogTableName(), partitionNames);
+
+        PartitionProjection projection = createProjection(table);
+        List<String> partitionColumnNames = table.getPartitionColumnNames();
+
+        Map<String, Partition> result = new HashMap<>();
+        for (String partitionName : partitionNames) {
+            // Parse partition name to extract filter values
+            Map<String, Optional<Object>> partitionFilters = parsePartitionName(partitionName, partitionColumnNames);
+
+            // Get projected partition for this specific filter
+            Map<String, Partition> partitions = projection.getProjectedPartitions(partitionFilters);
+
+            // The result should contain exactly one partition matching the requested name
+            if (partitions.containsKey(partitionName)) {
+                result.put(partitionName, partitions.get(partitionName));
+            } else if (!partitions.isEmpty()) {
+                // If the exact name doesn't match, add the first partition with the requested name
+                Partition partition = partitions.values().iterator().next();
+                result.put(partitionName, partition);
+            }
+        }
+
+        LOG.debug("Generated {} projected partitions from names for table: {}.{}",
+                result.size(), table.getCatalogDBName(), table.getCatalogTableName());
+
+        return result;
+    }
+
+    /**
+     * Parses a partition name into filter values.
+     * Partition names are in the format "col1=val1/col2=val2".
+     *
+     * @param partitionName the partition name
+     * @param partitionColumnNames the list of partition column names
+     * @return map of column name to filter value
+     */
+    private Map<String, Optional<Object>> parsePartitionName(String partitionName,
+                                                              List<String> partitionColumnNames) {
+        Map<String, Optional<Object>> filters = new HashMap<>();
+
+        // Initialize all columns with empty optional
+        for (String columnName : partitionColumnNames) {
+            filters.put(columnName, Optional.empty());
+        }
+
+        // Parse partition name parts (e.g., "rpt_date=2023-02-13")
+        String[] parts = partitionName.split("/");
+        for (String part : parts) {
+            int eqIndex = part.indexOf('=');
+            if (eqIndex > 0) {
+                String columnName = part.substring(0, eqIndex);
+                String value = part.substring(eqIndex + 1);
+                if (partitionColumnNames.contains(columnName)) {
+                    filters.put(columnName, Optional.of(value));
+                }
+            }
+        }
+
+        return filters;
+    }
 }
