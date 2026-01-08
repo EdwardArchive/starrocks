@@ -163,16 +163,26 @@ public class DateProjection implements ColumnProjection {
 
     @Override
     public List<String> getProjectedValues(Optional<Object> filterValue) {
-        if (filterValue.isPresent()) {
-            // Return the filter value if it's within the range
-            String filter = filterValue.get().toString();
-            return Collections.singletonList(filter);
-        }
-
         // Parse bounds at query time to handle NOW expressions correctly
         Instant now = Instant.now();
         Instant leftBound = parseDate(getRangeStart(), now);
         Instant rightBound = parseDate(getRangeEnd(), now);
+
+        if (filterValue.isPresent()) {
+            // Validate filter value is within range
+            String filter = filterValue.get().toString();
+            try {
+                Instant filterInstant = parseDate(filter, now);
+                if (filterInstant.isBefore(leftBound) || filterInstant.isAfter(rightBound)) {
+                    // Filter value is outside the range - return empty list
+                    return Collections.emptyList();
+                }
+                return Collections.singletonList(filter);
+            } catch (IllegalArgumentException e) {
+                // Invalid date format - return empty list
+                return Collections.emptyList();
+            }
+        }
 
         if (leftBound.isAfter(rightBound)) {
             throw new IllegalArgumentException(

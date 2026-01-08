@@ -259,40 +259,24 @@ public class HiveMetastoreOperations {
     }
 
     public List<String> getPartitionKeys(String dbName, String tableName) {
-        // Check if partition projection is enabled
         Table table = getTable(dbName, tableName);
-        LOG.info("[PartitionProjection] getPartitionKeys called for table: {}.{}, isHiveTable: {}",
-                dbName, tableName, (table instanceof HiveTable));
         if (table instanceof HiveTable) {
             HiveTable hiveTable = (HiveTable) table;
-            boolean isEnabled = partitionProjectionService.isEnabled(table);
-            LOG.info("[PartitionProjection] isEnabled: {}", isEnabled);
-            if (isEnabled) {
-                LOG.info("[PartitionProjection] Using partition projection to list partitions for table: {}.{}",
-                        dbName, tableName);
+            if (partitionProjectionService.isEnabled(table)) {
                 return partitionProjectionService.getProjectedPartitionNames(hiveTable);
             }
         }
-
         return metastore.getPartitionKeysByValue(dbName, tableName, HivePartitionValue.ALL_PARTITION_VALUES);
     }
 
     public List<String> getPartitionKeysByValue(String dbName, String tableName, List<Optional<String>> partitionValues) {
-        // Check if partition projection is enabled
         Table table = getTable(dbName, tableName);
-        LOG.info("[PartitionProjection] getPartitionKeysByValue called for table: {}.{}, partitionValues: {}, isHiveTable: {}",
-                dbName, tableName, partitionValues, (table instanceof HiveTable));
         if (table instanceof HiveTable) {
             HiveTable hiveTable = (HiveTable) table;
-            boolean isEnabled = partitionProjectionService.isEnabled(table);
-            LOG.info("[PartitionProjection] isEnabled: {}", isEnabled);
-            if (isEnabled) {
-                LOG.info("[PartitionProjection] Using partition projection to filter partitions for table: {}.{}",
-                        dbName, tableName);
+            if (partitionProjectionService.isEnabled(table)) {
                 return partitionProjectionService.getProjectedPartitionNamesByValue(hiveTable, partitionValues);
             }
         }
-
         return metastore.getPartitionKeysByValue(dbName, tableName, partitionValues);
     }
 
@@ -313,25 +297,16 @@ public class HiveMetastoreOperations {
     }
 
     public Map<String, Partition> getPartitionByPartitionKeys(Table table, List<PartitionKey> partitionKeys) {
-        // Check if partition projection is enabled for this table
-        LOG.info("[PartitionProjection] Checking table: {}, isHiveTable: {}",
-                table.getName(), (table instanceof HiveTable));
         if (table instanceof HiveTable) {
             HiveTable hiveTable = (HiveTable) table;
-            LOG.info("[PartitionProjection] Table properties: {}", hiveTable.getProperties());
-            boolean isEnabled = partitionProjectionService.isEnabled(table);
-            LOG.info("[PartitionProjection] isEnabled: {}", isEnabled);
-            if (isEnabled) {
-                LOG.info("[PartitionProjection] Using partition projection for table: {}.{}",
-                        hiveTable.getCatalogDBName(), hiveTable.getCatalogTableName());
+            if (partitionProjectionService.isEnabled(table)) {
                 return partitionProjectionService.getProjectedPartitions(hiveTable, partitionKeys);
             }
         }
 
-        // Standard metastore-based partition retrieval
-        String dbName = (table).getCatalogDBName();
-        String tblName = (table).getCatalogTableName();
-        List<String> partitionColumnNames = (table).getPartitionColumnNames();
+        String dbName = table.getCatalogDBName();
+        String tblName = table.getCatalogTableName();
+        List<String> partitionColumnNames = table.getPartitionColumnNames();
         List<String> partitionNames = partitionKeys.stream()
                 .map(partitionKey -> PartitionUtil.toHivePartitionName(partitionColumnNames, partitionKey))
                 .collect(Collectors.toList());
@@ -340,24 +315,15 @@ public class HiveMetastoreOperations {
     }
 
     public Map<String, Partition> getPartitionByNames(Table table, List<String> partitionNames) {
-        // Check if partition projection is enabled for this table
-        LOG.info("[PartitionProjection] getPartitionByNames called for table: {}, isHiveTable: {}",
-                table.getName(), (table instanceof HiveTable));
         if (table instanceof HiveTable) {
             HiveTable hiveTable = (HiveTable) table;
-            LOG.info("[PartitionProjection] Table properties: {}", hiveTable.getProperties());
-            boolean isEnabled = partitionProjectionService.isEnabled(table);
-            LOG.info("[PartitionProjection] isEnabled: {}", isEnabled);
-            if (isEnabled) {
-                LOG.info("[PartitionProjection] Using partition projection for table: {}.{}, partitionNames: {}",
-                        hiveTable.getCatalogDBName(), hiveTable.getCatalogTableName(), partitionNames);
+            if (partitionProjectionService.isEnabled(table)) {
                 return partitionProjectionService.getProjectedPartitionsFromNames(hiveTable, partitionNames);
             }
         }
 
-        // Standard metastore-based partition retrieval
-        String dbName = (table).getCatalogDBName();
-        String tblName = (table).getCatalogTableName();
+        String dbName = table.getCatalogDBName();
+        String tblName = table.getCatalogTableName();
         return metastore.getPartitionsByNames(dbName, tblName, partitionNames);
     }
 

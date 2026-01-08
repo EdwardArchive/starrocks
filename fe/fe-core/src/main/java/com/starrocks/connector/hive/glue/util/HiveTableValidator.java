@@ -60,15 +60,17 @@ public enum HiveTableValidator {
 
             // Check for partition projection tables
             // Support both 'projection.enabled' (AWS standard) and 'projection.enable' (legacy)
-            for (Map.Entry<String, String> entry : table.parameters().entrySet()) {
-                String key = entry.getKey();
-                String value = entry.getValue();
-                if ((key.equalsIgnoreCase("projection.enabled") || key.equalsIgnoreCase("projection.enable"))
-                        && "true".equalsIgnoreCase(value)) {
-                    // Partition projection is now supported - no need to check metastore partitions
-                    // The PartitionProjectionService will dynamically generate partitions based on
-                    // table properties, so empty metastore partitions are expected and valid.
-                    return;
+            if (table.parameters() != null) {
+                for (Map.Entry<String, String> entry : table.parameters().entrySet()) {
+                    String key = entry.getKey();
+                    String value = entry.getValue();
+                    if ((key.equalsIgnoreCase("projection.enabled") || key.equalsIgnoreCase("projection.enable"))
+                            && "true".equalsIgnoreCase(value)) {
+                        // Partition projection is now supported - no need to check metastore partitions
+                        // The PartitionProjectionService will dynamically generate partitions based on
+                        // table properties, so empty metastore partitions are expected and valid.
+                        return;
+                    }
                 }
             }
         }

@@ -102,10 +102,16 @@ public class PartitionProjection {
             projectedColumnValues.add(values);
         }
 
-        // 2. Calculate total combinations and validate
+        // 2. Calculate total combinations and validate (use multiplyExact to prevent overflow)
         long totalCombinations = 1;
         for (List<String> values : projectedColumnValues) {
-            totalCombinations *= values.size();
+            try {
+                totalCombinations = Math.multiplyExact(totalCombinations, values.size());
+            } catch (ArithmeticException e) {
+                throw new IllegalArgumentException(
+                        "Partition projection would generate too many partitions (overflow). " +
+                                "Please add more specific filters to the query.");
+            }
             if (totalCombinations > MAX_PARTITIONS) {
                 throw new IllegalArgumentException(
                         "Partition projection would generate more than " + MAX_PARTITIONS +

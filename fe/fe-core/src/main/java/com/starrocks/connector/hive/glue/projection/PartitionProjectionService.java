@@ -20,9 +20,8 @@ import com.starrocks.catalog.Table;
 import com.starrocks.connector.hive.Partition;
 import com.starrocks.connector.hive.RemoteFileInputFormat;
 import com.starrocks.connector.hive.TextFileFormatDesc;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,8 +41,6 @@ import java.util.Optional;
  *      AWS Athena Partition Projection</a>
  */
 public class PartitionProjectionService {
-
-    private static final Logger LOG = LogManager.getLogger(PartitionProjectionService.class);
 
     /**
      * Checks if partition projection is enabled for the given table.
@@ -205,9 +202,6 @@ public class PartitionProjectionService {
      */
     public Map<String, Partition> getProjectedPartitions(HiveTable table,
                                                           List<PartitionKey> partitionKeys) {
-        LOG.debug("Getting projected partitions for table: {}.{}",
-                table.getCatalogDBName(), table.getCatalogTableName());
-
         PartitionProjection projection = createProjection(table);
         List<String> partitionColumnNames = table.getPartitionColumnNames();
 
@@ -231,10 +225,6 @@ public class PartitionProjectionService {
         }
 
         Map<String, Partition> result = projection.getProjectedPartitions(partitionFilters);
-
-        LOG.debug("Generated {} projected partitions for table: {}.{}",
-                result.size(), table.getCatalogDBName(), table.getCatalogTableName());
-
         return result;
     }
 
@@ -259,9 +249,6 @@ public class PartitionProjectionService {
      * @return list of partition names in the format "col1=val1/col2=val2"
      */
     public List<String> getProjectedPartitionNames(HiveTable table) {
-        LOG.debug("Getting projected partition names for table: {}.{}",
-                table.getCatalogDBName(), table.getCatalogTableName());
-
         PartitionProjection projection = createProjection(table);
 
         // Get all projected partitions without any filter
@@ -271,11 +258,7 @@ public class PartitionProjectionService {
         }
 
         Map<String, Partition> partitions = projection.getProjectedPartitions(emptyFilters);
-        List<String> partitionNames = new java.util.ArrayList<>(partitions.keySet());
-
-        LOG.debug("Generated {} projected partition names for table: {}.{}",
-                partitionNames.size(), table.getCatalogDBName(), table.getCatalogTableName());
-
+        List<String> partitionNames = new ArrayList<>(partitions.keySet());
         return partitionNames;
     }
 
@@ -288,9 +271,6 @@ public class PartitionProjectionService {
      * @return list of partition names matching the filter
      */
     public List<String> getProjectedPartitionNamesByValue(HiveTable table, List<Optional<String>> partitionValues) {
-        LOG.info("[PartitionProjection] Getting projected partition names by value for table: {}.{}, values: {}",
-                table.getCatalogDBName(), table.getCatalogTableName(), partitionValues);
-
         PartitionProjection projection = createProjection(table);
         List<String> partitionColumnNames = table.getPartitionColumnNames();
 
@@ -305,14 +285,8 @@ public class PartitionProjectionService {
             }
         }
 
-        LOG.info("[PartitionProjection] Filters: {}", filters);
-
         Map<String, Partition> partitions = projection.getProjectedPartitions(filters);
-        List<String> partitionNames = new java.util.ArrayList<>(partitions.keySet());
-
-        LOG.info("[PartitionProjection] Generated {} projected partition names for table: {}.{}",
-                partitionNames.size(), table.getCatalogDBName(), table.getCatalogTableName());
-
+        List<String> partitionNames = new ArrayList<>(partitions.keySet());
         return partitionNames;
     }
 
@@ -326,66 +300,36 @@ public class PartitionProjectionService {
      */
     public Map<String, Partition> getProjectedPartitionsFromNames(HiveTable table,
                                                                    List<String> partitionNames) {
-        LOG.debug("Getting projected partitions from names for table: {}.{}, partitionNames: {}",
-                table.getCatalogDBName(), table.getCatalogTableName(), partitionNames);
-
-        PartitionProjection projection = createProjection(table);
-        List<String> partitionColumnNames = table.getPartitionColumnNames();
+        // Directly create partitions without going through full projection logic
+        // This is more efficient when we have specific partition names
+        String baseLocation = table.getTableLocation();
+        RemoteFileInputFormat inputFormat = getInputFormat(table);
+        TextFileFormatDesc textFileFormatDesc = getTextFileFormatDesc(table);
 
         Map<String, Partition> result = new HashMap<>();
         for (String partitionName : partitionNames) {
-            // Parse partition name to extract filter values
-            Map<String, Optional<Object>> partitionFilters = parsePartitionName(partitionName, partitionColumnNames);
-
-            // Get projected partition for this specific filter
-            Map<String, Partition> partitions = projection.getProjectedPartitions(partitionFilters);
-
-            // The result should contain exactly one partition matching the requested name
-            if (partitions.containsKey(partitionName)) {
-                result.put(partitionName, partitions.get(partitionName));
-            } else if (!partitions.isEmpty()) {
-                // If the exact name doesn't match, add the first partition with the requested name
-                Partition partition = partitions.values().iterator().next();
-                result.put(partitionName, partition);
+            // Build partition location directly from partition name
+            String partitionLocation = baseLocation;
+            if (!partitionLocation.endsWith("/")) {
+                partitionLocation += "/";
             }
-        }
+            partitionLocation += partitionName;
 
-        LOG.debug("Generated {} projected partitions from names for table: {}.{}",
-                result.size(), table.getCatalogDBName(), table.getCatalogTableName());
+            // Create partition object
+            Map<String, String> parameters = new HashMap<>();
+            parameters.put(Partition.TRANSIENT_LAST_DDL_TIME,
+                    String.valueOf(System.currentTimeMillis() / 1000));
+
+            Partition partition = new Partition(
+                    parameters,
+                    inputFormat,
+                    textFileFormatDesc,
+                    partitionLocation,
+                    true  // isSplittable
+            );
+            result.put(partitionName, partition);
+        }
 
         return result;
-    }
-
-    /**
-     * Parses a partition name into filter values.
-     * Partition names are in the format "col1=val1/col2=val2".
-     *
-     * @param partitionName the partition name
-     * @param partitionColumnNames the list of partition column names
-     * @return map of column name to filter value
-     */
-    private Map<String, Optional<Object>> parsePartitionName(String partitionName,
-                                                              List<String> partitionColumnNames) {
-        Map<String, Optional<Object>> filters = new HashMap<>();
-
-        // Initialize all columns with empty optional
-        for (String columnName : partitionColumnNames) {
-            filters.put(columnName, Optional.empty());
-        }
-
-        // Parse partition name parts (e.g., "rpt_date=2023-02-13")
-        String[] parts = partitionName.split("/");
-        for (String part : parts) {
-            int eqIndex = part.indexOf('=');
-            if (eqIndex > 0) {
-                String columnName = part.substring(0, eqIndex);
-                String value = part.substring(eqIndex + 1);
-                if (partitionColumnNames.contains(columnName)) {
-                    filters.put(columnName, Optional.of(value));
-                }
-            }
-        }
-
-        return filters;
     }
 }
