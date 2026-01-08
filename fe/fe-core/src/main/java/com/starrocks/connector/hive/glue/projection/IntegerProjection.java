@@ -14,7 +14,8 @@
 
 package com.starrocks.connector.hive.glue.projection;
 
-import com.starrocks.catalog.Type;
+import com.starrocks.type.IntegerType;
+import com.starrocks.type.Type;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -174,7 +175,7 @@ public class IntegerProjection implements ColumnProjection {
 
     @Override
     public Type getColumnType() {
-        return Type.BIGINT;
+        return IntegerType.BIGINT;
     }
 
     public long getLeftBound() {

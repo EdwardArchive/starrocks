@@ -14,7 +14,7 @@
 
 package com.starrocks.connector.hive.glue.projection;
 
-import com.starrocks.catalog.Type;
+import com.starrocks.type.VarcharType;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -69,7 +69,7 @@ public class InjectedProjectionTest {
     public void testGetColumnType() {
         InjectedProjection projection = new InjectedProjection("user_id");
 
-        assertEquals(Type.VARCHAR, projection.getColumnType());
+        assertEquals(VarcharType.VARCHAR, projection.getColumnType());
     }
 
     @Test

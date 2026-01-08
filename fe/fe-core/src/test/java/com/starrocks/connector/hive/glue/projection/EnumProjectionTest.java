@@ -14,7 +14,7 @@
 
 package com.starrocks.connector.hive.glue.projection;
 
-import com.starrocks.catalog.Type;
+import com.starrocks.type.VarcharType;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -82,7 +82,7 @@ public class EnumProjectionTest {
     public void testGetColumnType() {
         EnumProjection projection = new EnumProjection("region", "us,eu");
 
-        assertEquals(Type.VARCHAR, projection.getColumnType());
+        assertEquals(VarcharType.VARCHAR, projection.getColumnType());
     }
 
     @Test

@@ -14,7 +14,7 @@
 
 package com.starrocks.connector.hive.glue.projection;
 
-import com.starrocks.catalog.Type;
+import com.starrocks.type.Type;
 
 import java.util.List;
 import java.util.Optional;

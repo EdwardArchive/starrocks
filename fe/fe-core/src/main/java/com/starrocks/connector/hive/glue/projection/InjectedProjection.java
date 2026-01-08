@@ -14,7 +14,8 @@
 
 package com.starrocks.connector.hive.glue.projection;
 
-import com.starrocks.catalog.Type;
+import com.starrocks.type.Type;
+import com.starrocks.type.VarcharType;
 
 import java.util.Collections;
 import java.util.List;
@@ -75,7 +76,7 @@ public class InjectedProjection implements ColumnProjection {
 
     @Override
     public Type getColumnType() {
-        return Type.VARCHAR;
+        return VarcharType.VARCHAR;
     }
 
     @Override

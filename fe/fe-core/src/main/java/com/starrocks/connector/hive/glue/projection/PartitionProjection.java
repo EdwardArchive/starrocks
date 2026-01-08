@@ -215,10 +215,9 @@ public class PartitionProjection {
         switch (format) {
             case PARQUET:
             case ORC:
-            case TEXT:
+            case TEXTFILE:
             case AVRO:
-            case RCTEXT:
-            case RCBINARY:
+            case RCFILE:
             case SEQUENCE:
                 return true;
             default:

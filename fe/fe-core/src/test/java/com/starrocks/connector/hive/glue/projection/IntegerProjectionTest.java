@@ -14,7 +14,7 @@
 
 package com.starrocks.connector.hive.glue.projection;
 
-import com.starrocks.catalog.Type;
+import com.starrocks.type.IntegerType;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -146,7 +146,7 @@ public class IntegerProjectionTest {
         IntegerProjection projection = new IntegerProjection(
                 "year", "2020,2025", Optional.empty(), Optional.empty());
 
-        assertEquals(Type.BIGINT, projection.getColumnType());
+        assertEquals(IntegerType.BIGINT, projection.getColumnType());
     }
 
     @Test

@@ -14,13 +14,13 @@
 
 package com.starrocks.connector.hive.glue.projection;
 
-import com.starrocks.catalog.Type;
+import com.starrocks.type.Type;
+import com.starrocks.type.VarcharType;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
@@ -306,7 +306,7 @@ public class DateProjection implements ColumnProjection {
 
     @Override
     public Type getColumnType() {
-        return Type.VARCHAR;
+        return VarcharType.VARCHAR;
     }
 
     public String getFormatPattern() {

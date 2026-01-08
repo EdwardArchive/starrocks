@@ -15,7 +15,8 @@
 package com.starrocks.connector.hive.glue.projection;
 
 import com.google.common.collect.ImmutableList;
-import com.starrocks.catalog.Type;
+import com.starrocks.type.Type;
+import com.starrocks.type.VarcharType;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -95,7 +96,7 @@ public class EnumProjection implements ColumnProjection {
 
     @Override
     public Type getColumnType() {
-        return Type.VARCHAR;
+        return VarcharType.VARCHAR;
     }
 
     /**

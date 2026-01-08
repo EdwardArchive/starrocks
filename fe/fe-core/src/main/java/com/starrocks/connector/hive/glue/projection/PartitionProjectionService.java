@@ -109,13 +109,14 @@ public class PartitionProjectionService {
             case ORC:
                 return RemoteFileInputFormat.ORC;
             case TEXTFILE:
-                return RemoteFileInputFormat.TEXT;
+                return RemoteFileInputFormat.TEXTFILE;
             case AVRO:
                 return RemoteFileInputFormat.AVRO;
-            case SEQUENCEFILE:
+            case SEQUENCE:
                 return RemoteFileInputFormat.SEQUENCE;
-            case RCFILE:
-                return RemoteFileInputFormat.RCBINARY;
+            case RCBINARY:
+            case RCTEXT:
+                return RemoteFileInputFormat.RCFILE;
             default:
                 return RemoteFileInputFormat.UNKNOWN;
         }
@@ -219,7 +220,7 @@ public class PartitionProjectionService {
             PartitionKey firstKey = partitionKeys.get(0);
             for (int i = 0; i < partitionColumnNames.size() && i < firstKey.getKeys().size(); i++) {
                 String columnName = partitionColumnNames.get(i);
-                Object value = firstKey.getKeys().get(i).getRealValue();
+                String value = firstKey.getKeys().get(i).getStringValue();
                 partitionFilters.put(columnName, Optional.ofNullable(value));
             }
         } else {
