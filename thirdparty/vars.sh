@@ -253,10 +253,10 @@ ARROW_SOURCE="arrow-apache-arrow-19.0.1"
 ARROW_MD5SUM="8c5091da0f8fb41a47d7f4dad7b712df"
 
 # S2
-S2_DOWNLOAD="https://github.com/google/s2geometry/archive/v0.9.0.tar.gz"
-S2_NAME=s2geometry-0.9.0.tar.gz
-S2_SOURCE=s2geometry-0.9.0
-S2_MD5SUM="293552c7646193b8b4a01556808fe155"
+S2_DOWNLOAD="https://github.com/google/s2geometry/archive/v0.11.1.tar.gz"
+S2_NAME=s2geometry-0.11.1.tar.gz
+S2_SOURCE=s2geometry-0.11.1
+S2_MD5SUM="a3ad381b1ed85bdcb7283403ebc781f8"
 
 # BITSHUFFLE
 BITSHUFFLE_DOWNLOAD="https://github.com/kiyo-masui/bitshuffle/archive/0.5.1.tar.gz"
@@ -417,10 +417,10 @@ CLUCENE_MD5SUM="c218eb0fbbfe7f295e81ab1c8a9317cb"
 
 
 #absl
-ABSL_DOWNLOAD="https://github.com/abseil/abseil-cpp/archive/refs/tags/20220623.0.tar.gz"
-ABSL_NAME="abseil-cpp-20220623.0.tar.gz"
-ABSL_SOURCE="abseil-cpp-20220623.0"
-ABSL_MD5SUM="955b6faedf32ec2ce1b7725561d15618"
+ABSL_DOWNLOAD="https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.1.tar.gz"
+ABSL_NAME="abseil-cpp-20230802.1.tar.gz"
+ABSL_SOURCE="abseil-cpp-20230802.1"
+ABSL_MD5SUM="84665b6daa5dda7c9082b1a00057457a"
 
 # cares - grpc dependency
 CARES_DOWNLOAD="https://github.com/c-ares/c-ares/archive/tags/cares-1_19_1.tar.gz"

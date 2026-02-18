@@ -80,7 +80,10 @@
 #error _GLIBCXX_USE_CXX11_ABI must be non-zero
 #endif
 
-DECLARE_bool(s2debug);
+#include <absl/flags/declare.h>
+#include <absl/flags/flag.h>
+
+ABSL_DECLARE_FLAG(bool, s2debug);
 
 static void help(const char*);
 
@@ -143,8 +146,8 @@ int main(int argc, char** argv) {
         exit(-1);
     }
 
-    // S2 will crashes when deserialization fails and FLAGS_s2debug was true.
-    FLAGS_s2debug = false;
+    // S2 will crashes when deserialization fails and s2debug flag was true.
+    absl::SetFlag(&FLAGS_s2debug, false);
 
     using starrocks::Status;
     using std::string;

@@ -264,7 +264,7 @@ if ("${CMAKE_BUILD_TARGET_ARCH}" STREQUAL "x86" OR "${CMAKE_BUILD_TARGET_ARCH}" 
 elseif ("${CMAKE_BUILD_TARGET_ARCH}" STREQUAL "aarch64")
     set(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -march=armv8-a+crc")
 endif()
-set(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS}  -Wno-attributes -DS2_USE_GFLAGS -DS2_USE_GLOG")
+set(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS}  -Wno-attributes")
 
 if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0)
     set(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -faligned-new")
@@ -457,6 +457,44 @@ set(STARROCKS_DEPENDENCIES
     clucene-contribs-lib
     rocksdb
     libs2
+    # S2 v0.11.1 depends on abseil for flags, logging, and core utilities
+    absl_flags
+    absl_flags_internal
+    absl_flags_reflection
+    absl_flags_marshalling
+    absl_flags_commandlineflag
+    absl_flags_commandlineflag_internal
+    absl_flags_config
+    absl_flags_private_handle_accessor
+    absl_flags_program_name
+    absl_log_internal_check_op
+    absl_log_internal_conditions
+    absl_log_internal_message
+    absl_log_internal_nullguard
+    absl_log_internal_log_sink_set
+    absl_log_internal_globals
+    absl_log_internal_format
+    absl_log_internal_proto
+    absl_log_sink
+    absl_log_globals
+    absl_log_entry
+    absl_strings
+    absl_strings_internal
+    absl_str_format_internal
+    absl_int128
+    absl_base
+    absl_raw_logging_internal
+    absl_spinlock_wait
+    absl_throw_delegate
+    absl_time
+    absl_time_zone
+    absl_strerror
+    absl_symbolize
+    absl_stacktrace
+    absl_debugging_internal
+    absl_demangle_internal
+    absl_examine_stack
+    absl_malloc_internal
     snappy
     ${Boost_LIBRARIES}
     thrift

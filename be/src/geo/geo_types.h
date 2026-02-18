@@ -41,14 +41,10 @@
 #include "geo/geo_common.h"
 #include "geo/wkt_parse_type.h"
 
+class S2Point;
 class S2Polyline;
 class S2Polygon;
 class S2Cap;
-
-template <typename T>
-class Vector3;
-typedef Vector3<double> Vector3_d;
-using S2Point = Vector3_d;
 
 namespace starrocks {
 

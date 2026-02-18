@@ -320,13 +320,10 @@ fi
 cd -
 echo "Finished patching $BRPC_SOURCE"
 
-# s2 patch to disable shared library
+# s2 v0.11.1 patch: fix DEBUG_MODE conflict with glog
 cd $TP_SOURCE_DIR/$S2_SOURCE
 if [ ! -f $PATCHED_MARK ]; then
-    patch -p1 < $TP_PATCH_DIR/s2geometry-0.9.0.patch
-    # replace uint64 with uint64_t to make compiler happy
-    patch -p0 < $TP_PATCH_DIR/s2geometry-0.9.0-uint64.patch
-    patch -p1 < $TP_PATCH_DIR/s2geometry-0.9.0-cxx17.patch
+    patch -p1 < $TP_PATCH_DIR/s2geometry-0.11.1-glog-compat.patch
     touch $PATCHED_MARK
 fi
 cd -

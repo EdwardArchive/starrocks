@@ -257,6 +257,8 @@ set(EXEC_FILES
         ./formats/disk_range_test.cpp
         ./geo/geo_types_test.cpp
         ./geo/wkt_parse_test.cpp
+        ./geo/s2_compat_snapshot_gen.cpp
+        ./geo/s2_serialization_compat_test.cpp
         ./http/default_path_handlers_test.cpp
         ./http/http_client_test.cpp
         ./http/http_utils_test.cpp
